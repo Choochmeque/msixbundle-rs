@@ -1,0 +1,25 @@
+[package]
+name = "msixbundle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Rust library to pack per-arch MSIX and build/sign .msixbundle using Windows SDK tools"
+readme = "../README.md"
+categories = ["os::windows", "development-tools"]
+keywords = ["msix", "appx", "windows", "makeappx", "signtool"]
+
+[features]
+default = ["sdk-discovery"]
+sdk-discovery = ["dep:winreg"]
+
+[dependencies]
+anyhow = "1"
+thiserror = "1"
+roxmltree = "0.20"
+winreg = { version = "0.52", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
