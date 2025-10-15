@@ -17,11 +17,6 @@ jobs:
     name: cargo-clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: librsvg2-dev patchelf llvm-dev clang cmake
-          version: "1.0"  # bump this to invalidate the cache when needed
-
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo clippy --all-targets --all-features -- -D warnings
@@ -31,11 +26,6 @@ jobs:
     name: cargo-deadlinks
     runs-on: ubuntu-latest
     steps:
-      - uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: librsvg2-dev patchelf llvm-dev clang cmake
-          version: "1.0"  # bump this to invalidate the cache when needed
-
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-deadlinks
