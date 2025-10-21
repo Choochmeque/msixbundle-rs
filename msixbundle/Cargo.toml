@@ -18,7 +18,7 @@ sdk-discovery = ["dep:winreg"]
 [dependencies]
 anyhow = "1"
 thiserror = "1"
-roxmltree = "0.20"
+roxmltree = "0.21"
 winreg = { version = "0.52", optional = true }
 
 [dev-dependencies]
