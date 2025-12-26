@@ -15,7 +15,7 @@ jobs:
   # Static analyzer.
   clippy:
     name: cargo-clippy
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -24,7 +24,7 @@ jobs:
   # Check links in the documentation.
   deadlinks:
     name: cargo-deadlinks
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
