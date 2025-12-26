@@ -4,36 +4,6 @@ use msixbundle::*;
 use std::path::Path;
 use tempfile::tempdir;
 
-fn is_elevated() -> bool {
-    use std::mem;
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::Security::{
-        GetTokenInformation, OpenProcessToken, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
-    };
-    use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
-    unsafe {
-        let mut token = std::mem::zeroed();
-        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
-            return false;
-        }
-
-        let mut elevation: TOKEN_ELEVATION = mem::zeroed();
-        let mut size = mem::size_of::<TOKEN_ELEVATION>() as u32;
-
-        let result = GetTokenInformation(
-            token,
-            TokenElevation,
-            &mut elevation as *mut _ as *mut _,
-            size,
-            &mut size,
-        );
-
-        CloseHandle(token);
-        result != 0 && elevation.TokenIsElevated != 0
-    }
-}
-
 fn create_minimal_appx_content(dir: &Path) {
     let manifest = r#"<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -428,8 +398,6 @@ fn test_read_manifest_missing_version() {
 
 #[test]
 fn test_validate_msix() {
-    assert!(is_elevated(), "test requires admin elevation");
-
     let tools = locate_sdk_tools().expect("locate SDK");
     assert!(tools.appcert.is_some(), "WACK not installed");
 
@@ -445,8 +413,6 @@ fn test_validate_msix() {
 
 #[test]
 fn test_validate_bundle() {
-    assert!(is_elevated(), "test requires admin elevation");
-
     let tools = locate_sdk_tools().expect("locate SDK");
     assert!(tools.appcert.is_some(), "WACK not installed");
 
