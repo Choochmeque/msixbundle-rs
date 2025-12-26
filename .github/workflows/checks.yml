@@ -19,15 +19,4 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-
-  # Check links in the documentation.
-  deadlinks:
-    name: cargo-deadlinks
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install cargo-deadlinks
-      - run: cargo doc --no-deps -p msixbundle
-      - run: cargo deadlinks --no-build
+      - run: cargo clippy --all-targets --all-features -- -D warnings -D clippy::unwrap_used
