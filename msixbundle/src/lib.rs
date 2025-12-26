@@ -372,13 +372,17 @@ pub fn build_bundle(
 ) -> Result<PathBuf> {
     let map = out_dir.join("bundlemap.txt");
     let mut s = String::from("[Files]\n");
-    for (arch, path) in built {
+    for (_arch, path) in built {
+        let filename = path
+            .file_name()
+            .map(|f| f.to_string_lossy())
+            .unwrap_or_else(|| path.to_string_lossy());
         s.push('"');
         s.push_str(&path.to_string_lossy());
         s.push('"');
         s.push(' ');
         s.push('"');
-        s.push_str(arch);
+        s.push_str(&filename);
         s.push('"');
         s.push('\n');
     }
