@@ -618,7 +618,11 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
         .as_ref()
         .ok_or(MsixError::ToolMissing("appcert.exe (WACK)"))?;
 
-    let report_file = std::env::temp_dir().join("wack_report.xml");
+    // Use unique report file to avoid conflicts with previous runs
+    let report_file = std::env::temp_dir().join(format!("wack_report_{}.xml", std::process::id()));
+    // Remove existing report file if present
+    let _ = fs::remove_file(&report_file);
+
     let status = Command::new(appcert)
         .args([
             "test",
