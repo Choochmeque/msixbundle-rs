@@ -618,14 +618,14 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
         .as_ref()
         .ok_or(MsixError::ToolMissing("appcert.exe (WACK)"))?;
 
-    let report_dir = std::env::temp_dir();
+    let report_file = std::env::temp_dir().join("wack_report.xml");
     let status = Command::new(appcert)
         .args([
             "test",
             "-appxpackagepath",
             &msix_or_bundle.to_string_lossy(),
             "-reportoutputpath",
-            &report_dir.to_string_lossy(),
+            &report_file.to_string_lossy(),
         ])
         .status()
         .context("run appcert (WACK)")?;
