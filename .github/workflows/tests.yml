@@ -1,0 +1,12 @@
+name: Tests
+
+on: [pull_request, push]
+
+jobs:
+  test:
+    name: cargo-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all-features

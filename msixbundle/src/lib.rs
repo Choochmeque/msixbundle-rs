@@ -615,3 +615,81 @@ impl Version4 {
         Ok(Self(a, b, c, d))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_removes_invalid_chars() {
+        assert_eq!(sanitize("My:App"), "MyApp");
+        assert_eq!(sanitize("App<>Name"), "AppName");
+        assert_eq!(sanitize("Test/App\\Name"), "TestAppName");
+    }
+
+    #[test]
+    fn sanitize_returns_app_for_empty() {
+        assert_eq!(sanitize(""), "App");
+        assert_eq!(sanitize(":::"), "App");
+    }
+
+    #[test]
+    fn sanitize_preserves_valid_chars() {
+        assert_eq!(sanitize("MyApp 2.0"), "MyApp 2.0");
+        assert_eq!(sanitize("App-Name_v1"), "App-Name_v1");
+    }
+
+    #[test]
+    fn version4_parse_valid() {
+        let v = Version4::parse("10.0.19041.0").expect("valid version");
+        assert_eq!(v, Version4(10, 0, 19041, 0));
+    }
+
+    #[test]
+    fn version4_parse_invalid() {
+        assert!(Version4::parse("10.0.19041").is_err()); // too few parts
+        assert!(Version4::parse("10.0.19041.0.0").is_err()); // too many parts
+        assert!(Version4::parse("abc").is_err());
+    }
+
+    #[test]
+    fn version4_ordering() {
+        let v1 = Version4::parse("10.0.19041.0").expect("v1");
+        let v2 = Version4::parse("10.0.22000.0").expect("v2");
+        assert!(v2 > v1);
+    }
+
+    #[test]
+    fn read_manifest_info_valid() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let manifest = r#"<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+  <Identity Name="MyCompany.MyApp" Version="1.2.3.0" Publisher="CN=Test"/>
+  <Properties>
+    <DisplayName>My Cool App</DisplayName>
+  </Properties>
+</Package>"#;
+        std::fs::write(dir.path().join("AppxManifest.xml"), manifest).expect("write manifest");
+
+        let info = read_manifest_info(dir.path()).expect("parse manifest");
+        assert_eq!(info.version, "1.2.3.0");
+        assert_eq!(info.display_name, "My Cool App");
+    }
+
+    #[test]
+    fn read_manifest_info_ms_resource_fallback() {
+        // When DisplayName is "ms-resource:..." should fall back to Identity Name
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let manifest = r#"<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+  <Identity Name="MyCompany.MyApp" Version="1.0.0.0" Publisher="CN=Test"/>
+  <Properties>
+    <DisplayName>ms-resource:AppName</DisplayName>
+  </Properties>
+</Package>"#;
+        std::fs::write(dir.path().join("AppxManifest.xml"), manifest).expect("write manifest");
+
+        let info = read_manifest_info(dir.path()).expect("parse manifest");
+        assert_eq!(info.display_name, "MyCompany.MyApp");
+    }
+}
