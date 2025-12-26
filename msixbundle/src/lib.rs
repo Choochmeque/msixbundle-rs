@@ -60,21 +60,26 @@ pub enum MsixError {
     /// Failed to parse AppxManifest.xml.
     #[error("Manifest parse error: {0}")]
     Manifest(String),
+    /// WACK validation failed.
+    #[error("Validation failed: {0}")]
+    Validation(String),
     /// Other miscellaneous error.
     #[error("{0}")]
     Other(String),
 }
 
-/// Paths to Windows SDK tools (MakeAppx.exe and SignTool.exe).
+/// Paths to Windows SDK tools (MakeAppx.exe, SignTool.exe, and appcert.exe).
 ///
 /// This struct holds the absolute paths to the Windows SDK executables needed
-/// for creating and signing MSIX packages.
+/// for creating, signing, and validating MSIX packages.
 #[derive(Clone, Debug)]
 pub struct SdkTools {
-    /// Path to MakeAppx.exe (required for pack, bundle, and validate operations).
+    /// Path to MakeAppx.exe (required for pack and bundle operations).
     pub makeappx: PathBuf,
     /// Path to SignTool.exe (optional, only needed for signing operations).
     pub signtool: Option<PathBuf>,
+    /// Path to appcert.exe (optional, only needed for WACK validation).
+    pub appcert: Option<PathBuf>,
 }
 
 /// Automatically locates Windows SDK tools on the system.
@@ -154,7 +159,23 @@ pub fn locate_sdk_tools() -> Result<SdkTools> {
             None
         }
     };
-    Ok(SdkTools { makeappx, signtool })
+    // WACK (Windows App Certification Kit) is in a separate directory
+    let appcert = {
+        let kits_root10: String = roots.get_value("KitsRoot10").context("read KitsRoot10")?;
+        let p = PathBuf::from(kits_root10)
+            .join("App Certification Kit")
+            .join("appcert.exe");
+        if p.exists() {
+            Some(p)
+        } else {
+            None
+        }
+    };
+    Ok(SdkTools {
+        makeappx,
+        signtool,
+        appcert,
+    })
 }
 
 /// Information extracted from an AppxManifest.xml file.
@@ -554,24 +575,27 @@ pub fn verify_signature(tools: &SdkTools, artifact: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Validates the internal structure of a .msix package or .msixbundle.
+/// Validates a .msix package or .msixbundle using Windows App Certification Kit (WACK).
 ///
-/// Invokes MakeAppx.exe validate command to check for structural errors such as:
-/// - Missing or incorrect manifest files
-/// - Invalid file paths or references
-/// - Missing assets referenced in the manifest
-/// - Package integrity issues
+/// Invokes appcert.exe to perform comprehensive validation including:
+/// - Package structure and manifest validation
+/// - App capabilities and security checks
+/// - Microsoft Store submission requirements
+///
+/// **Note:** This function requires administrator privileges on Windows.
+/// On GitHub Actions Windows runners, UAC is disabled and validation works automatically.
 ///
 /// # Arguments
 ///
-/// * `tools` - SDK tools paths (makeappx.exe must be available)
+/// * `tools` - SDK tools paths (appcert.exe must be available)
 /// * `msix_or_bundle` - Path to the .msix or .msixbundle file to validate
 ///
 /// # Errors
 ///
 /// Returns an error if:
-/// - MakeAppx.exe validation fails
-/// - Package structure is invalid
+/// - appcert.exe (WACK) is not found
+/// - Validation fails (package doesn't meet requirements)
+/// - Process execution fails (may happen without admin privileges)
 ///
 /// # Example
 ///
@@ -584,17 +608,30 @@ pub fn verify_signature(tools: &SdkTools, artifact: &Path) -> Result<()> {
 /// let bundle = Path::new("./output/App_1.0.0.msixbundle");
 ///
 /// validate_package(&tools, bundle)?;
-/// println!("Package structure is valid!");
+/// println!("Package passed WACK validation!");
 /// # Ok(())
 /// # }
 /// ```
 pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
-    let status = Command::new(&tools.makeappx)
-        .args(["validate", "/p", &msix_or_bundle.to_string_lossy()])
+    let appcert = tools
+        .appcert
+        .as_ref()
+        .ok_or(MsixError::ToolMissing("appcert.exe (WACK)"))?;
+
+    let report_dir = std::env::temp_dir();
+    let status = Command::new(appcert)
+        .args([
+            "test",
+            "-appxpackagepath",
+            &msix_or_bundle.to_string_lossy(),
+            "-reportoutputpath",
+            &report_dir.to_string_lossy(),
+        ])
         .status()
-        .context("run MakeAppx validate")?;
+        .context("run appcert (WACK)")?;
+
     if !status.success() {
-        return Err(MsixError::MakeAppx(format!("validate {}", msix_or_bundle.display())).into());
+        return Err(MsixError::Validation(msix_or_bundle.display().to_string()).into());
     }
     Ok(())
 }

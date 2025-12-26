@@ -23,3 +23,6 @@ winreg = { version = "0.55", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Security", "Win32_System_Threading", "Win32_Foundation"] }
