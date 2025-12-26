@@ -397,33 +397,37 @@ fn test_read_manifest_missing_version() {
 }
 
 #[test]
-fn test_validate_msix() {
+fn test_validate_msix_and_bundle() {
+    // WACK (appcert.exe) can only run one instance at a time,
+    // so we test all validation in a single test.
     let tools = locate_sdk_tools().expect("locate SDK");
     assert!(tools.appcert.is_some(), "WACK not installed");
 
-    let content_dir = tempdir().expect("create content dir");
+    let x64_dir = tempdir().expect("create x64 dir");
+    let arm64_dir = tempdir().expect("create arm64 dir");
     let out_dir = tempdir().expect("create out dir");
 
-    create_minimal_appx_content(content_dir.path());
-    let info = read_manifest_info(content_dir.path()).expect("read manifest");
-    let msix = pack_arch(&tools, content_dir.path(), out_dir.path(), &info, "x64").expect("pack");
+    // Create content for both architectures
+    create_appx_content_for_arch(x64_dir.path(), "x64");
+    create_appx_content_for_arch(arm64_dir.path(), "arm64");
 
-    validate_package(&tools, &msix).expect("validate should pass");
-}
+    let info = read_manifest_info(x64_dir.path()).expect("read manifest");
 
-#[test]
-fn test_validate_bundle() {
-    let tools = locate_sdk_tools().expect("locate SDK");
-    assert!(tools.appcert.is_some(), "WACK not installed");
+    // Pack both architectures
+    let msix_x64 =
+        pack_arch(&tools, x64_dir.path(), out_dir.path(), &info, "x64").expect("pack x64");
+    let msix_arm64 =
+        pack_arch(&tools, arm64_dir.path(), out_dir.path(), &info, "arm64").expect("pack arm64");
 
-    let content_dir = tempdir().expect("create content dir");
-    let out_dir = tempdir().expect("create out dir");
+    // Validate single MSIX
+    validate_package(&tools, &msix_x64).expect("validate x64 msix should pass");
 
-    create_minimal_appx_content(content_dir.path());
-    let info = read_manifest_info(content_dir.path()).expect("read manifest");
-    let msix = pack_arch(&tools, content_dir.path(), out_dir.path(), &info, "x64").expect("pack");
-    let built = vec![("x64".to_string(), msix)];
+    // Build and validate multi-arch bundle
+    let built = vec![
+        ("x64".to_string(), msix_x64),
+        ("arm64".to_string(), msix_arm64),
+    ];
     let bundle = build_bundle(&tools, out_dir.path(), &built, &info).expect("build bundle");
 
-    validate_package(&tools, &bundle).expect("validate should pass");
+    validate_package(&tools, &bundle).expect("validate multi-arch bundle should pass");
 }
