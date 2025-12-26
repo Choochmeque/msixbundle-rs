@@ -7,7 +7,8 @@ use tempfile::tempdir;
 fn create_minimal_appx_content(dir: &Path) {
     let manifest = r#"<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10">
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
   <Identity Name="TestCompany.TestApp" Version="1.0.0.0"
             Publisher="CN=Test" ProcessorArchitecture="x64"/>
   <Properties>
@@ -21,6 +22,9 @@ fn create_minimal_appx_content(dir: &Path) {
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0"/>
   </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust"/>
+  </Capabilities>
   <Applications>
     <Application Id="App" Executable="app.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements DisplayName="TestApp" Description="Test"
