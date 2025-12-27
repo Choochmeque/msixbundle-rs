@@ -618,6 +618,11 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
         .as_ref()
         .ok_or(MsixError::ToolMissing("appcert.exe (WACK)"))?;
 
+    // Canonicalize path to get absolute path with proper Windows separators
+    let package_path = msix_or_bundle
+        .canonicalize()
+        .context("canonicalize package path")?;
+
     // Use unique report file to avoid conflicts with previous runs
     let report_file = std::env::temp_dir().join(format!("wack_report_{}.xml", std::process::id()));
     // Remove existing report file if present
@@ -627,7 +632,7 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
         .args([
             "test",
             "-appxpackagepath",
-            &msix_or_bundle.to_string_lossy(),
+            &package_path.to_string_lossy(),
             "-reportoutputpath",
             &report_file.to_string_lossy(),
         ])
@@ -635,7 +640,7 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
         .context("run appcert (WACK)")?;
 
     if !status.success() {
-        return Err(MsixError::Validation(msix_or_bundle.display().to_string()).into());
+        return Err(MsixError::Validation(package_path.display().to_string()).into());
     }
     Ok(())
 }

@@ -53,12 +53,8 @@ jobs:
           msixbundle-cli --out-dir ./output --dir-x64 ./test-content-x64
           if (!(Test-Path ./output/*.msixbundle)) { exit 1 }
 
-      - name: Test CLI multi-arch bundle
+      - name: Test CLI multi-arch bundle with --validate
         shell: pwsh
         run: |
-          msixbundle-cli --out-dir ./output-multi --dir-x64 ./test-content-x64 --dir-arm64 ./test-content-arm64
+          msixbundle-cli --out-dir ./output-multi --dir-x64 ./test-content-x64 --dir-arm64 ./test-content-arm64 --validate
           if (!(Test-Path ./output-multi/*.msixbundle)) { exit 1 }
-
-      - name: Test CLI with --validate
-        shell: pwsh
-        run: msixbundle-cli --out-dir ./output-validate --dir-x64 ./test-content-x64 --validate
