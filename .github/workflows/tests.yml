@@ -10,3 +10,55 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-features
+
+  cli-test:
+    name: cli-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install CLI
+        run: cargo install --path msixbundle-cli
+
+      - name: Create test content
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path test-content-x64/Assets
+          Copy-Item msixbundle/tests/fixtures/logo.png test-content-x64/Assets/
+          @'
+          <?xml version="1.0" encoding="utf-8"?>
+          <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+            <Identity Name="TestCompany.TestApp" Version="1.0.0.0" Publisher="CN=Test" ProcessorArchitecture="x64"/>
+            <Properties><DisplayName>TestApp</DisplayName><PublisherDisplayName>Test Company</PublisherDisplayName><Logo>Assets\logo.png</Logo></Properties>
+            <Resources><Resource Language="en-us"/></Resources>
+            <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0"/></Dependencies>
+            <Capabilities><rescap:Capability Name="runFullTrust"/></Capabilities>
+            <Applications>
+              <Application Id="App" Executable="app.exe" EntryPoint="Windows.FullTrustApplication">
+                <uap:VisualElements DisplayName="TestApp" Description="Test" Square150x150Logo="Assets\logo.png" Square44x44Logo="Assets\logo.png" BackgroundColor="transparent"/>
+              </Application>
+            </Applications>
+          </Package>
+          '@ | Out-File -Encoding utf8 test-content-x64/AppxManifest.xml
+          [byte[]]@(0x4D, 0x5A) | Set-Content -Path test-content-x64/app.exe -Encoding Byte
+          Copy-Item -Recurse test-content-x64 test-content-arm64
+          (Get-Content test-content-arm64/AppxManifest.xml) -replace 'x64', 'arm64' | Set-Content test-content-arm64/AppxManifest.xml
+
+      - name: Test CLI pack x64
+        shell: pwsh
+        run: |
+          msixbundle-cli --out-dir ./output --dir-x64 ./test-content-x64
+          if (!(Test-Path ./output/*.msixbundle)) { exit 1 }
+
+      - name: Test CLI multi-arch bundle
+        shell: pwsh
+        run: |
+          msixbundle-cli --out-dir ./output-multi --dir-x64 ./test-content-x64 --dir-arm64 ./test-content-arm64
+          if (!(Test-Path ./output-multi/*.msixbundle)) { exit 1 }
+
+      - name: Test CLI with --validate
+        shell: pwsh
+        run: msixbundle-cli --out-dir ./output-validate --dir-x64 ./test-content-x64 --validate
