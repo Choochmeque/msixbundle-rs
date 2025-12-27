@@ -58,3 +58,16 @@ jobs:
         run: |
           msixbundle-cli --out-dir ./output-multi --dir-x64 ./test-content-x64 --dir-arm64 ./test-content-arm64 --validate
           if (!(Test-Path ./output-multi/*.msixbundle)) { exit 1 }
+
+      - name: Create test certificate
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Test" -CertStoreLocation Cert:\CurrentUser\My
+          $pwd = ConvertTo-SecureString -String "TestPass123" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath test.pfx -Password $pwd
+
+      - name: Test CLI with signing
+        shell: pwsh
+        run: |
+          msixbundle-cli --out-dir ./output-signed --dir-x64 ./test-content-x64 --pfx ./test.pfx --pfx-password TestPass123 --timestamp-url "" --verify
+          if (!(Test-Path ./output-signed/*.msixbundle)) { exit 1 }
