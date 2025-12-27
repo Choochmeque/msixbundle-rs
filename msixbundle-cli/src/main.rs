@@ -61,6 +61,17 @@ struct Args {
     verbose: bool,
 }
 
+/// Resolve path to absolute, stripping Windows extended-length prefix (\\?\)
+fn resolve_path(p: &std::path::Path) -> Result<PathBuf> {
+    let abs = p.canonicalize()?;
+    let s = abs.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        Ok(PathBuf::from(stripped))
+    } else {
+        Ok(abs)
+    }
+}
+
 fn main() -> Result<()> {
     let a = Args::parse();
     if a.verbose {
@@ -72,6 +83,7 @@ fn main() -> Result<()> {
         bail!("Provide at least one of --dir-x64 or --dir-arm64");
     }
     std::fs::create_dir_all(&a.out_dir)?;
+    let out_dir = resolve_path(&a.out_dir)?;
 
     let mut tools = locate_sdk_tools()?;
     if let Some(p) = &a.signtool_path {
@@ -83,15 +95,17 @@ fn main() -> Result<()> {
     let mut info: Option<ManifestInfo> = None;
 
     if let Some(dir) = &a.dir_x64 {
-        let m = read_manifest_info(dir)?;
+        let dir = resolve_path(dir)?;
+        let m = read_manifest_info(&dir)?;
         info = Some(m.clone());
         info!("x64: {}", dir.display());
-        let msix = pack_arch(&tools, dir, &a.out_dir, &m, "x64")?;
+        let msix = pack_arch(&tools, &dir, &out_dir, &m, "x64")?;
         built.push(("x64".into(), msix));
     }
 
     if let Some(dir) = &a.dir_arm64 {
-        let m = read_manifest_info(dir)?;
+        let dir = resolve_path(dir)?;
+        let m = read_manifest_info(&dir)?;
         if let Some(i) = &info {
             if i.version != m.version {
                 bail!(
@@ -104,7 +118,7 @@ fn main() -> Result<()> {
             info = Some(m.clone());
         }
         info!("arm64: {}", dir.display());
-        let msix = pack_arch(&tools, dir, &a.out_dir, &m, "arm64")?;
+        let msix = pack_arch(&tools, &dir, &out_dir, &m, "arm64")?;
         built.push(("arm64".into(), msix));
     }
 
@@ -141,7 +155,7 @@ fn main() -> Result<()> {
     }
 
     // Bundle
-    let bundle = build_bundle(&tools, &a.out_dir, &built, &info)?;
+    let bundle = build_bundle(&tools, &out_dir, &built, &info)?;
     info!("bundle: {}", bundle.display());
 
     // Sign bundle
