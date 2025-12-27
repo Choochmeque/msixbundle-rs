@@ -43,7 +43,7 @@ jobs:
             </Applications>
           </Package>
           '@ | Out-File -Encoding utf8 test-content-x64/AppxManifest.xml
-          [byte[]]@(0x4D, 0x5A) | Set-Content -Path test-content-x64/app.exe -Encoding Byte
+          [System.IO.File]::WriteAllBytes("test-content-x64/app.exe", [byte[]]@(0x4D, 0x5A))
           Copy-Item -Recurse test-content-x64 test-content-arm64
           (Get-Content test-content-arm64/AppxManifest.xml) -replace 'x64', 'arm64' | Set-Content test-content-arm64/AppxManifest.xml
 
