@@ -1,0 +1,32 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - "v*.*.*"         # e.g. v1.2.3
+  workflow_dispatch:      # allow manual runs
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish msixbundle
+        run: cargo publish -p msixbundle
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io index update
+        run: Start-Sleep -Seconds 10
+
+      - name: Publish msixbundle-cli
+        run: cargo publish -p msixbundle-cli
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
