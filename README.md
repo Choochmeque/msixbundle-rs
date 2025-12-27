@@ -10,10 +10,10 @@ A Rust library and CLI tool for building and signing Windows MSIX packages and M
 
 - **Multi-architecture support**: Build separate MSIX packages for x64 and ARM64 architectures
 - **Automatic bundle creation**: Combine per-architecture packages into a single `.msixbundle`
-- **SDK auto-discovery**: Automatically locate Windows SDK tools (`MakeAppx.exe`, `signtool.exe`) via registry
+- **SDK auto-discovery**: Automatically locate Windows SDK tools (`MakeAppx.exe`, `signtool.exe`, `appcert.exe`) via registry
 - **Code signing**: Sign packages and bundles with PFX certificates
 - **Timestamping**: Support for both RFC3161 and Authenticode timestamp protocols
-- **Validation**: Verify package structure and signatures using SDK tools
+- **Validation**: Validate packages using Windows App Certification Kit (WACK) and verify signatures
 - **Manifest parsing**: Extract version and display name from `AppxManifest.xml`
 - **Library and CLI**: Use as a Rust library or standalone command-line tool
 
@@ -30,7 +30,7 @@ The core library providing the building blocks for MSIX packaging operations.
 - `build_bundle()` - Combine multiple .msix files into a .msixbundle
 - `sign_artifact()` - Sign packages/bundles with a PFX certificate
 - `verify_signature()` - Verify digital signatures
-- `validate_package()` - Check package structure for errors
+- `validate_package()` - Validate packages using WACK (Windows App Certification Kit)
 
 ### CLI: `msixbundle-cli`
 
@@ -118,7 +118,7 @@ msixbundle-cli \
 | `--sip-dll` | Path to Appx SIP DLL (e.g., `C:\Windows\System32\AppxSip.dll`) |
 | `--timestamp-url` | Timestamp server URL (default: `http://timestamp.digicert.com`) |
 | `--timestamp-mode` | Timestamping protocol: `rfc3161` or `authenticode` (default: `rfc3161`) |
-| `--validate` | Validate package structure with MakeAppx after building |
+| `--validate` | Validate packages using WACK (Windows App Certification Kit) |
 | `--verify` | Verify signatures with SignTool after signing |
 | `--verbose` | Enable verbose logging (sets `RUST_LOG=info`) |
 
@@ -176,6 +176,9 @@ fn main() -> anyhow::Result<()> {
 - **Windows OS**: This tool requires Windows and the Windows SDK
 - **Windows SDK 10**: MakeAppx.exe and signtool.exe must be installed
   - Install via [Visual Studio](https://visualstudio.microsoft.com/) or [standalone SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/)
+- **Windows App Certification Kit (WACK)**: Required for `--validate` flag (appcert.exe)
+  - Installed automatically with the Windows SDK
+  - Note: WACK validation may require administrator privileges on some systems
 - **Rust**: 1.70+ (2021 edition)
 
 The library can automatically discover SDK tools via the Windows registry, or you can provide explicit paths.
@@ -187,7 +190,7 @@ The library can automatically discover SDK tools via the Windows registry, or yo
 3. **Bundle Mapping**: Generates a `bundlemap.txt` file listing all architecture packages
 4. **Bundle Creation**: Uses `MakeAppx.exe` to combine packages into a `.msixbundle`
 5. **Signing**: Uses `signtool.exe` to apply digital signatures with optional timestamping
-6. **Validation**: Optionally verifies package structure and signature validity
+6. **Validation**: Optionally validates packages with WACK and verifies signature validity
 
 ## Creating a Self-Signed Certificate for Testing
 
@@ -297,6 +300,7 @@ The library uses `anyhow::Result` for error handling and provides custom error t
 - `MakeAppx`: MakeAppx.exe operation failed
 - `SignTool`: signtool.exe operation failed
 - `Manifest`: Manifest parsing error
+- `Validation`: WACK validation failed
 
 ## Features
 
