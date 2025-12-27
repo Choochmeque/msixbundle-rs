@@ -60,21 +60,26 @@ pub enum MsixError {
     /// Failed to parse AppxManifest.xml.
     #[error("Manifest parse error: {0}")]
     Manifest(String),
+    /// WACK validation failed.
+    #[error("Validation failed: {0}")]
+    Validation(String),
     /// Other miscellaneous error.
     #[error("{0}")]
     Other(String),
 }
 
-/// Paths to Windows SDK tools (MakeAppx.exe and SignTool.exe).
+/// Paths to Windows SDK tools (MakeAppx.exe, SignTool.exe, and appcert.exe).
 ///
 /// This struct holds the absolute paths to the Windows SDK executables needed
-/// for creating and signing MSIX packages.
+/// for creating, signing, and validating MSIX packages.
 #[derive(Clone, Debug)]
 pub struct SdkTools {
-    /// Path to MakeAppx.exe (required for pack, bundle, and validate operations).
+    /// Path to MakeAppx.exe (required for pack and bundle operations).
     pub makeappx: PathBuf,
     /// Path to SignTool.exe (optional, only needed for signing operations).
     pub signtool: Option<PathBuf>,
+    /// Path to appcert.exe (optional, only needed for WACK validation).
+    pub appcert: Option<PathBuf>,
 }
 
 /// Automatically locates Windows SDK tools on the system.
@@ -154,7 +159,23 @@ pub fn locate_sdk_tools() -> Result<SdkTools> {
             None
         }
     };
-    Ok(SdkTools { makeappx, signtool })
+    // WACK (Windows App Certification Kit) is in a separate directory
+    let appcert = {
+        let kits_root10: String = roots.get_value("KitsRoot10").context("read KitsRoot10")?;
+        let p = PathBuf::from(kits_root10)
+            .join("App Certification Kit")
+            .join("appcert.exe");
+        if p.exists() {
+            Some(p)
+        } else {
+            None
+        }
+    };
+    Ok(SdkTools {
+        makeappx,
+        signtool,
+        appcert,
+    })
 }
 
 /// Information extracted from an AppxManifest.xml file.
@@ -372,13 +393,17 @@ pub fn build_bundle(
 ) -> Result<PathBuf> {
     let map = out_dir.join("bundlemap.txt");
     let mut s = String::from("[Files]\n");
-    for (arch, path) in built {
+    for (_arch, path) in built {
+        let filename = path
+            .file_name()
+            .map(|f| f.to_string_lossy())
+            .unwrap_or_else(|| path.to_string_lossy());
         s.push('"');
         s.push_str(&path.to_string_lossy());
         s.push('"');
         s.push(' ');
         s.push('"');
-        s.push_str(arch);
+        s.push_str(&filename);
         s.push('"');
         s.push('\n');
     }
@@ -550,24 +575,27 @@ pub fn verify_signature(tools: &SdkTools, artifact: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Validates the internal structure of a .msix package or .msixbundle.
+/// Validates a .msix package or .msixbundle using Windows App Certification Kit (WACK).
 ///
-/// Invokes MakeAppx.exe validate command to check for structural errors such as:
-/// - Missing or incorrect manifest files
-/// - Invalid file paths or references
-/// - Missing assets referenced in the manifest
-/// - Package integrity issues
+/// Invokes appcert.exe to perform comprehensive validation including:
+/// - Package structure and manifest validation
+/// - App capabilities and security checks
+/// - Microsoft Store submission requirements
+///
+/// **Note:** This function requires administrator privileges on Windows.
+/// On GitHub Actions Windows runners, UAC is disabled and validation works automatically.
 ///
 /// # Arguments
 ///
-/// * `tools` - SDK tools paths (makeappx.exe must be available)
+/// * `tools` - SDK tools paths (appcert.exe must be available)
 /// * `msix_or_bundle` - Path to the .msix or .msixbundle file to validate
 ///
 /// # Errors
 ///
 /// Returns an error if:
-/// - MakeAppx.exe validation fails
-/// - Package structure is invalid
+/// - appcert.exe (WACK) is not found
+/// - Validation fails (package doesn't meet requirements)
+/// - Process execution fails (may happen without admin privileges)
 ///
 /// # Example
 ///
@@ -580,17 +608,34 @@ pub fn verify_signature(tools: &SdkTools, artifact: &Path) -> Result<()> {
 /// let bundle = Path::new("./output/App_1.0.0.msixbundle");
 ///
 /// validate_package(&tools, bundle)?;
-/// println!("Package structure is valid!");
+/// println!("Package passed WACK validation!");
 /// # Ok(())
 /// # }
 /// ```
 pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
-    let status = Command::new(&tools.makeappx)
-        .args(["validate", "/p", &msix_or_bundle.to_string_lossy()])
+    let appcert = tools
+        .appcert
+        .as_ref()
+        .ok_or(MsixError::ToolMissing("appcert.exe (WACK)"))?;
+
+    // Use unique report file to avoid conflicts with previous runs
+    let report_file = std::env::temp_dir().join(format!("wack_report_{}.xml", std::process::id()));
+    // Remove existing report file if present
+    let _ = fs::remove_file(&report_file);
+
+    let status = Command::new(appcert)
+        .args([
+            "test",
+            "-appxpackagepath",
+            &msix_or_bundle.to_string_lossy(),
+            "-reportoutputpath",
+            &report_file.to_string_lossy(),
+        ])
         .status()
-        .context("run MakeAppx validate")?;
+        .context("run appcert (WACK)")?;
+
     if !status.success() {
-        return Err(MsixError::MakeAppx(format!("validate {}", msix_or_bundle.display())).into());
+        return Err(MsixError::Validation(msix_or_bundle.display().to_string()).into());
     }
     Ok(())
 }
@@ -609,5 +654,83 @@ impl Version4 {
             return Err(());
         }
         Ok(Self(a, b, c, d))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_removes_invalid_chars() {
+        assert_eq!(sanitize("My:App"), "MyApp");
+        assert_eq!(sanitize("App<>Name"), "AppName");
+        assert_eq!(sanitize("Test/App\\Name"), "TestAppName");
+    }
+
+    #[test]
+    fn sanitize_returns_app_for_empty() {
+        assert_eq!(sanitize(""), "App");
+        assert_eq!(sanitize(":::"), "App");
+    }
+
+    #[test]
+    fn sanitize_preserves_valid_chars() {
+        assert_eq!(sanitize("MyApp 2.0"), "MyApp 2.0");
+        assert_eq!(sanitize("App-Name_v1"), "App-Name_v1");
+    }
+
+    #[test]
+    fn version4_parse_valid() {
+        let v = Version4::parse("10.0.19041.0").expect("valid version");
+        assert_eq!(v, Version4(10, 0, 19041, 0));
+    }
+
+    #[test]
+    fn version4_parse_invalid() {
+        assert!(Version4::parse("10.0.19041").is_err()); // too few parts
+        assert!(Version4::parse("10.0.19041.0.0").is_err()); // too many parts
+        assert!(Version4::parse("abc").is_err());
+    }
+
+    #[test]
+    fn version4_ordering() {
+        let v1 = Version4::parse("10.0.19041.0").expect("v1");
+        let v2 = Version4::parse("10.0.22000.0").expect("v2");
+        assert!(v2 > v1);
+    }
+
+    #[test]
+    fn read_manifest_info_valid() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let manifest = r#"<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+  <Identity Name="MyCompany.MyApp" Version="1.2.3.0" Publisher="CN=Test"/>
+  <Properties>
+    <DisplayName>My Cool App</DisplayName>
+  </Properties>
+</Package>"#;
+        std::fs::write(dir.path().join("AppxManifest.xml"), manifest).expect("write manifest");
+
+        let info = read_manifest_info(dir.path()).expect("parse manifest");
+        assert_eq!(info.version, "1.2.3.0");
+        assert_eq!(info.display_name, "My Cool App");
+    }
+
+    #[test]
+    fn read_manifest_info_ms_resource_fallback() {
+        // When DisplayName is "ms-resource:..." should fall back to Identity Name
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let manifest = r#"<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
+  <Identity Name="MyCompany.MyApp" Version="1.0.0.0" Publisher="CN=Test"/>
+  <Properties>
+    <DisplayName>ms-resource:AppName</DisplayName>
+  </Properties>
+</Package>"#;
+        std::fs::write(dir.path().join("AppxManifest.xml"), manifest).expect("write manifest");
+
+        let info = read_manifest_info(dir.path()).expect("parse manifest");
+        assert_eq!(info.display_name, "MyCompany.MyApp");
     }
 }
