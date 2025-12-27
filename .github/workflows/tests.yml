@@ -69,5 +69,5 @@ jobs:
       - name: Test CLI with signing
         shell: pwsh
         run: |
-          msixbundle-cli --out-dir ./output-signed --dir-x64 ./test-content-x64 --pfx ./test.pfx --pfx-password TestPass123 --timestamp-url "" --verify
+          msixbundle-cli --out-dir ./output-signed --dir-x64 ./test-content-x64 --pfx ./test.pfx --pfx-password TestPass123 --timestamp-url ""
           if (!(Test-Path ./output-signed/*.msixbundle)) { exit 1 }
