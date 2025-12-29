@@ -7,7 +7,7 @@ repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
 description = "Rust library to pack per-arch MSIX and build/sign .msixbundle using Windows SDK tools"
-readme = "../README.md"
+readme = "README.md"
 categories = ["os::windows-apis", "development-tools"]
 keywords = ["msix", "appx", "windows", "makeappx", "signtool"]
 

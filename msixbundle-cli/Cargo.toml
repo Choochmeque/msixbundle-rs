@@ -7,7 +7,7 @@ repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
 description = "Command-line tool to pack/sign MSIX and build .msixbundle"
-readme = "../README.md"
+readme = "README.md"
 categories = ["os::windows-apis", "development-tools"]
 keywords = ["msix", "appx", "windows"]
 
