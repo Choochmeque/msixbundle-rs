@@ -284,6 +284,7 @@ fn sanitize(s: &str) -> String {
 /// * `out_dir` - Directory where the .msix file will be created
 /// * `info` - Manifest info from [`read_manifest_info()`]
 /// * `arch` - Architecture identifier (e.g., "x64", "arm64", "x86")
+/// * `overwrite` - If `true`, overwrite existing output file
 ///
 /// # Returns
 ///
@@ -307,7 +308,7 @@ fn sanitize(s: &str) -> String {
 /// let info = read_manifest_info(dir)?;
 /// let out = Path::new("./output");
 ///
-/// let msix = pack_arch(&tools, dir, out, &info, "x64")?;
+/// let msix = pack_arch(&tools, dir, out, &info, "x64", false)?;
 /// println!("Created: {}", msix.display());
 /// # Ok(())
 /// # }
@@ -318,21 +319,26 @@ pub fn pack_arch(
     out_dir: &Path,
     info: &ManifestInfo,
     arch: &str,
+    overwrite: bool,
 ) -> Result<PathBuf> {
     let out = out_dir.join(format!(
         "{}_{}_{}.msix",
         info.display_name, info.version, arch
     ));
+    let mut args: Vec<OsString> = vec![
+        "pack".into(),
+        "/d".into(),
+        appx_dir.as_os_str().into(),
+        "/p".into(),
+        out.as_os_str().into(),
+        "/h".into(),
+        "SHA256".into(),
+    ];
+    if overwrite {
+        args.push("/o".into());
+    }
     let status = Command::new(&tools.makeappx)
-        .args([
-            OsString::from("pack"),
-            "/d".into(),
-            appx_dir.as_os_str().into(),
-            "/p".into(),
-            out.as_os_str().into(),
-            "/h".into(),
-            "SHA256".into(),
-        ])
+        .args(args)
         .status()
         .context("run MakeAppx pack")?;
     if !status.success() {
@@ -353,6 +359,7 @@ pub fn pack_arch(
 /// * `out_dir` - Directory where the .msixbundle and bundlemap.txt will be created
 /// * `built` - Vector of (architecture, .msix path) tuples from [`pack_arch()`]
 /// * `info` - Manifest info from [`read_manifest_info()`]
+/// * `overwrite` - If `true`, overwrite existing output file
 ///
 /// # Returns
 ///
@@ -380,7 +387,7 @@ pub fn pack_arch(
 /// ];
 ///
 /// let info = read_manifest_info(Path::new("./AppxContent"))?;
-/// let bundle = build_bundle(&tools, out, &packages, &info)?;
+/// let bundle = build_bundle(&tools, out, &packages, &info, false)?;
 /// println!("Bundle: {}", bundle.display());
 /// # Ok(())
 /// # }
@@ -390,6 +397,7 @@ pub fn build_bundle(
     out_dir: &Path,
     built: &[(String, PathBuf)],
     info: &ManifestInfo,
+    overwrite: bool,
 ) -> Result<PathBuf> {
     let map = out_dir.join("bundlemap.txt");
     let mut s = String::from("[Files]\n");
@@ -409,16 +417,20 @@ pub fn build_bundle(
     }
     fs::write(&map, s).context("write bundlemap.txt")?;
     let bundle = out_dir.join(format!("{}_{}.msixbundle", info.display_name, info.version));
+    let mut args: Vec<OsString> = vec![
+        "bundle".into(),
+        "/f".into(),
+        map.as_os_str().into(),
+        "/p".into(),
+        bundle.as_os_str().into(),
+        "/bv".into(),
+        info.version.clone().into(),
+    ];
+    if overwrite {
+        args.push("/o".into());
+    }
     let status = Command::new(&tools.makeappx)
-        .args([
-            OsString::from("bundle"),
-            "/f".into(),
-            map.as_os_str().into(),
-            "/p".into(),
-            bundle.as_os_str().into(),
-            "/bv".into(),
-            info.version.clone().into(),
-        ])
+        .args(args)
         .status()
         .context("run MakeAppx bundle")?;
     if !status.success() {

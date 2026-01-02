@@ -58,7 +58,15 @@ fn test_pack_arch() {
     create_minimal_appx_content(content_dir.path());
     let info = read_manifest_info(content_dir.path()).expect("read manifest");
 
-    let msix = pack_arch(&tools, content_dir.path(), out_dir.path(), &info, "x64").expect("pack");
+    let msix = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        false,
+    )
+    .expect("pack");
     assert!(msix.exists());
     assert!(msix.to_string_lossy().ends_with(".msix"));
 
@@ -119,10 +127,18 @@ fn test_build_bundle() {
     create_minimal_appx_content(content_dir.path());
     let info = read_manifest_info(content_dir.path()).expect("read manifest");
 
-    let msix = pack_arch(&tools, content_dir.path(), out_dir.path(), &info, "x64").expect("pack");
+    let msix = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        false,
+    )
+    .expect("pack");
     let built = vec![("x64".to_string(), msix)];
 
-    let bundle = build_bundle(&tools, out_dir.path(), &built, &info).expect("build bundle");
+    let bundle = build_bundle(&tools, out_dir.path(), &built, &info, false).expect("build bundle");
     assert!(bundle.exists());
     assert!(bundle.to_string_lossy().ends_with(".msixbundle"));
 
@@ -249,9 +265,16 @@ fn test_multi_arch_bundle() {
 
     // Pack both architectures
     let msix_x64 =
-        pack_arch(&tools, x64_dir.path(), out_dir.path(), &info, "x64").expect("pack x64");
-    let msix_arm64 =
-        pack_arch(&tools, arm64_dir.path(), out_dir.path(), &info, "arm64").expect("pack arm64");
+        pack_arch(&tools, x64_dir.path(), out_dir.path(), &info, "x64", false).expect("pack x64");
+    let msix_arm64 = pack_arch(
+        &tools,
+        arm64_dir.path(),
+        out_dir.path(),
+        &info,
+        "arm64",
+        false,
+    )
+    .expect("pack arm64");
 
     let built = vec![
         ("x64".to_string(), msix_x64),
@@ -259,7 +282,7 @@ fn test_multi_arch_bundle() {
     ];
 
     // Build bundle with both architectures
-    let bundle = build_bundle(&tools, out_dir.path(), &built, &info).expect("build bundle");
+    let bundle = build_bundle(&tools, out_dir.path(), &built, &info, false).expect("build bundle");
     assert!(bundle.exists());
 
     // Validate by unbundling
@@ -320,10 +343,18 @@ fn test_bundlemap_format() {
     create_minimal_appx_content(content_dir.path());
     let info = read_manifest_info(content_dir.path()).expect("read manifest");
 
-    let msix = pack_arch(&tools, content_dir.path(), out_dir.path(), &info, "x64").expect("pack");
+    let msix = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        false,
+    )
+    .expect("pack");
     let built = vec![("x64".to_string(), msix.clone())];
 
-    let _bundle = build_bundle(&tools, out_dir.path(), &built, &info).expect("build bundle");
+    let _bundle = build_bundle(&tools, out_dir.path(), &built, &info, false).expect("build bundle");
 
     // Read and verify bundlemap.txt format
     let bundlemap_path = out_dir.path().join("bundlemap.txt");
@@ -415,9 +446,16 @@ fn test_validate_msix_and_bundle() {
 
     // Pack both architectures
     let msix_x64 =
-        pack_arch(&tools, x64_dir.path(), out_dir.path(), &info, "x64").expect("pack x64");
-    let msix_arm64 =
-        pack_arch(&tools, arm64_dir.path(), out_dir.path(), &info, "arm64").expect("pack arm64");
+        pack_arch(&tools, x64_dir.path(), out_dir.path(), &info, "x64", false).expect("pack x64");
+    let msix_arm64 = pack_arch(
+        &tools,
+        arm64_dir.path(),
+        out_dir.path(),
+        &info,
+        "arm64",
+        false,
+    )
+    .expect("pack arm64");
 
     // Validate single MSIX
     validate_package(&tools, &msix_x64).expect("validate x64 msix should pass");
@@ -427,7 +465,141 @@ fn test_validate_msix_and_bundle() {
         ("x64".to_string(), msix_x64),
         ("arm64".to_string(), msix_arm64),
     ];
-    let bundle = build_bundle(&tools, out_dir.path(), &built, &info).expect("build bundle");
+    let bundle = build_bundle(&tools, out_dir.path(), &built, &info, false).expect("build bundle");
 
     validate_package(&tools, &bundle).expect("validate multi-arch bundle should pass");
+}
+
+#[test]
+fn test_pack_arch_overwrite_false_fails_when_exists() {
+    let tools = locate_sdk_tools().expect("locate SDK");
+    let content_dir = tempdir().expect("create content dir");
+    let out_dir = tempdir().expect("create out dir");
+
+    create_minimal_appx_content(content_dir.path());
+    let info = read_manifest_info(content_dir.path()).expect("read manifest");
+
+    // First pack should succeed
+    let msix = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        false,
+    )
+    .expect("first pack");
+    assert!(msix.exists());
+
+    // Second pack without overwrite should fail
+    let result = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        false,
+    );
+    assert!(
+        result.is_err(),
+        "pack should fail when file exists and overwrite=false"
+    );
+}
+
+#[test]
+fn test_pack_arch_overwrite_true_succeeds_when_exists() {
+    let tools = locate_sdk_tools().expect("locate SDK");
+    let content_dir = tempdir().expect("create content dir");
+    let out_dir = tempdir().expect("create out dir");
+
+    create_minimal_appx_content(content_dir.path());
+    let info = read_manifest_info(content_dir.path()).expect("read manifest");
+
+    // First pack
+    let msix1 = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        false,
+    )
+    .expect("first pack");
+    assert!(msix1.exists());
+
+    // Second pack with overwrite should succeed
+    let msix2 = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        true,
+    )
+    .expect("second pack with overwrite");
+    assert!(msix2.exists());
+    assert_eq!(msix1, msix2, "should produce same path");
+}
+
+#[test]
+fn test_build_bundle_overwrite_false_fails_when_exists() {
+    let tools = locate_sdk_tools().expect("locate SDK");
+    let content_dir = tempdir().expect("create content dir");
+    let out_dir = tempdir().expect("create out dir");
+
+    create_minimal_appx_content(content_dir.path());
+    let info = read_manifest_info(content_dir.path()).expect("read manifest");
+
+    let msix = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        false,
+    )
+    .expect("pack");
+    let built = vec![("x64".to_string(), msix)];
+
+    // First bundle should succeed
+    let bundle = build_bundle(&tools, out_dir.path(), &built, &info, false).expect("first bundle");
+    assert!(bundle.exists());
+
+    // Second bundle without overwrite should fail
+    let result = build_bundle(&tools, out_dir.path(), &built, &info, false);
+    assert!(
+        result.is_err(),
+        "bundle should fail when file exists and overwrite=false"
+    );
+}
+
+#[test]
+fn test_build_bundle_overwrite_true_succeeds_when_exists() {
+    let tools = locate_sdk_tools().expect("locate SDK");
+    let content_dir = tempdir().expect("create content dir");
+    let out_dir = tempdir().expect("create out dir");
+
+    create_minimal_appx_content(content_dir.path());
+    let info = read_manifest_info(content_dir.path()).expect("read manifest");
+
+    let msix = pack_arch(
+        &tools,
+        content_dir.path(),
+        out_dir.path(),
+        &info,
+        "x64",
+        false,
+    )
+    .expect("pack");
+    let built = vec![("x64".to_string(), msix)];
+
+    // First bundle
+    let bundle1 = build_bundle(&tools, out_dir.path(), &built, &info, false).expect("first bundle");
+    assert!(bundle1.exists());
+
+    // Second bundle with overwrite should succeed
+    let bundle2 = build_bundle(&tools, out_dir.path(), &built, &info, true)
+        .expect("second bundle with overwrite");
+    assert!(bundle2.exists());
+    assert_eq!(bundle1, bundle2, "should produce same path");
 }

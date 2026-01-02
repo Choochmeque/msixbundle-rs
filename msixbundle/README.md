@@ -46,19 +46,19 @@ fn main() -> anyhow::Result<()> {
     let manifest = read_manifest_info(x64_dir)?;
     println!("Building {} v{}", manifest.display_name, manifest.version);
 
-    // Pack architectures
+    // Pack architectures (last param: overwrite existing files)
     let out_dir = Path::new("./output");
-    let x64_msix = pack_arch(&tools, x64_dir, out_dir, &manifest, "x64")?;
+    let x64_msix = pack_arch(&tools, x64_dir, out_dir, &manifest, "x64", true)?;
 
     let arm64_dir = Path::new("./build/arm64/AppxContent");
-    let arm64_msix = pack_arch(&tools, arm64_dir, out_dir, &manifest, "arm64")?;
+    let arm64_msix = pack_arch(&tools, arm64_dir, out_dir, &manifest, "arm64", true)?;
 
     // Build bundle
     let packages = vec![
         ("x64".to_string(), x64_msix),
         ("arm64".to_string(), arm64_msix),
     ];
-    let bundle = build_bundle(&tools, out_dir, &packages, &manifest)?;
+    let bundle = build_bundle(&tools, out_dir, &packages, &manifest, true)?;
 
     // Sign the bundle
     let pfx = Path::new("./signing.pfx");

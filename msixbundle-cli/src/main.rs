@@ -59,6 +59,10 @@ struct Args {
     /// Increase verbosity (RUST_LOG=info)
     #[arg(long)]
     verbose: bool,
+
+    /// Overwrite existing output files
+    #[arg(long)]
+    force: bool,
 }
 
 /// Resolve path to absolute, stripping Windows extended-length prefix (\\?\)
@@ -99,7 +103,7 @@ fn main() -> Result<()> {
         let m = read_manifest_info(&dir)?;
         info = Some(m.clone());
         info!("x64: {}", dir.display());
-        let msix = pack_arch(&tools, &dir, &out_dir, &m, "x64")?;
+        let msix = pack_arch(&tools, &dir, &out_dir, &m, "x64", a.force)?;
         built.push(("x64".into(), msix));
     }
 
@@ -118,7 +122,7 @@ fn main() -> Result<()> {
             info = Some(m.clone());
         }
         info!("arm64: {}", dir.display());
-        let msix = pack_arch(&tools, &dir, &out_dir, &m, "arm64")?;
+        let msix = pack_arch(&tools, &dir, &out_dir, &m, "arm64", a.force)?;
         built.push(("arm64".into(), msix));
     }
 
@@ -155,7 +159,7 @@ fn main() -> Result<()> {
     }
 
     // Bundle
-    let bundle = build_bundle(&tools, &out_dir, &built, &info)?;
+    let bundle = build_bundle(&tools, &out_dir, &built, &info, a.force)?;
     info!("bundle: {}", bundle.display());
 
     // Sign bundle

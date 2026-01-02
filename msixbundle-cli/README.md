@@ -78,6 +78,7 @@ msixbundle-cli \
 | `--validate` | Validate packages using WACK (Windows App Certification Kit) |
 | `--verify` | Verify signatures with SignTool after signing |
 | `--verbose` | Enable verbose logging (sets `RUST_LOG=info`) |
+| `--force` | Overwrite existing output files |
 
 ## Creating a Self-Signed Certificate
 
