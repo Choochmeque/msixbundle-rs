@@ -336,6 +336,8 @@ pub fn pack_arch(
     ];
     if overwrite {
         args.push("/o".into());
+    } else {
+        args.push("/no".into());
     }
     let status = Command::new(&tools.makeappx)
         .args(args)
@@ -428,6 +430,8 @@ pub fn build_bundle(
     ];
     if overwrite {
         args.push("/o".into());
+    } else {
+        args.push("/no".into());
     }
     let status = Command::new(&tools.makeappx)
         .args(args)
