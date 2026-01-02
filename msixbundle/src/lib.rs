@@ -29,7 +29,7 @@
 //!
 //! // Pack a single architecture
 //! let out_dir = Path::new("./output");
-//! let msix = pack_arch(&tools, app_dir, out_dir, &manifest, "x64")?;
+//! let msix = pack_arch(&tools, app_dir, out_dir, &manifest, "x64", true)?;
 //!
 //! println!("Created: {}", msix.display());
 //! # Ok(())
