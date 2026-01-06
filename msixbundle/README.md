@@ -15,7 +15,7 @@ msixbundle = "1.0"
 - **Manifest parsing**: Extract version and display name from `AppxManifest.xml`
 - **Package creation**: Create `.msix` files for each architecture
 - **Bundle creation**: Combine multiple `.msix` files into a `.msixbundle`
-- **Code signing**: Sign packages and bundles with PFX certificates
+- **Code signing**: Sign packages and bundles with PFX certificates or certificate store thumbprints
 - **Timestamping**: Support for RFC3161 and Authenticode protocols
 - **Validation**: Validate packages using WACK and verify signatures
 
@@ -27,7 +27,7 @@ msixbundle = "1.0"
 | `read_manifest_info()` | Parse AppxManifest.xml for version and identity |
 | `pack_arch()` | Create a per-architecture .msix package |
 | `build_bundle()` | Combine multiple .msix files into a .msixbundle |
-| `sign_artifact()` | Sign packages/bundles with a PFX certificate |
+| `sign_artifact()` | Sign packages/bundles with a PFX or certificate thumbprint |
 | `verify_signature()` | Verify digital signatures |
 | `validate_package()` | Validate packages using WACK |
 
@@ -60,17 +60,33 @@ fn main() -> anyhow::Result<()> {
     ];
     let bundle = build_bundle(&tools, out_dir, &packages, &manifest, true)?;
 
-    // Sign the bundle
+    // Sign the bundle with PFX
     let pfx = Path::new("./signing.pfx");
     sign_artifact(&tools, &SignOptions {
         artifact: &bundle,
-        pfx,
-        password: Some("password"),
+        certificate: CertificateSource::Pfx {
+            path: pfx,
+            password: Some("password"),
+        },
         sip_dll: None,
         timestamp_url: Some("http://timestamp.digicert.com"),
         rfc3161: true,
         signtool_override: None,
     })?;
+
+    // Or sign with a certificate thumbprint from the Windows store
+    // sign_artifact(&tools, &SignOptions {
+    //     artifact: &bundle,
+    //     certificate: CertificateSource::Thumbprint {
+    //         sha1: "1a2b3c4d5e6f...",
+    //         store: Some("My"),
+    //         machine_store: false,
+    //     },
+    //     sip_dll: None,
+    //     timestamp_url: Some("http://timestamp.digicert.com"),
+    //     rfc3161: true,
+    //     signtool_override: None,
+    // })?;
 
     // Verify the signature
     verify_signature(&tools, &bundle)?;

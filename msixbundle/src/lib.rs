@@ -9,7 +9,7 @@
 //! - Manifest parsing from AppxManifest.xml files
 //! - Multi-architecture package creation (x64, ARM64, etc.)
 //! - Bundle creation from multiple architecture packages
-//! - Code signing with PFX certificates
+//! - Code signing with PFX certificates or certificate store thumbprints
 //! - Timestamping support (RFC3161 and Authenticode)
 //! - Package validation and signature verification
 //!
@@ -66,6 +66,31 @@ pub enum MsixError {
     /// Other miscellaneous error.
     #[error("{0}")]
     Other(String),
+}
+
+/// Certificate source for signing operations.
+///
+/// Specifies how to locate the signing certificate - either from a PFX file
+/// or from the Windows certificate store using a thumbprint.
+#[derive(Clone, Debug)]
+pub enum CertificateSource<'a> {
+    /// PFX file with optional password.
+    Pfx {
+        /// Path to the .pfx certificate file.
+        path: &'a Path,
+        /// Password for the PFX file (if encrypted).
+        password: Option<&'a str>,
+    },
+    /// Certificate from Windows certificate store identified by thumbprint.
+    Thumbprint {
+        /// SHA1 thumbprint of the certificate (40 hex characters).
+        sha1: &'a str,
+        /// Certificate store name. Common values: "My" (Personal), "Root", "CA".
+        /// See: <https://learn.microsoft.com/en-us/dotnet/framework/tools/signtool-exe>
+        store: Option<&'a str>,
+        /// Use machine store instead of current user store.
+        machine_store: bool,
+    },
 }
 
 /// Paths to Windows SDK tools (MakeAppx.exe, SignTool.exe, and appcert.exe).
@@ -445,14 +470,12 @@ pub fn build_bundle(
 
 /// Options for signing MSIX packages or bundles with SignTool.exe.
 ///
-/// Configures certificate, password, timestamping, and other signing parameters.
+/// Configures certificate source, timestamping, and other signing parameters.
 pub struct SignOptions<'a> {
     /// Path to the .msix, .msixbundle, or other artifact to sign.
     pub artifact: &'a Path,
-    /// Path to the PFX certificate file.
-    pub pfx: &'a Path,
-    /// Password for the PFX certificate (if encrypted).
-    pub password: Option<&'a str>,
+    /// Certificate source (PFX file or thumbprint from certificate store).
+    pub certificate: CertificateSource<'a>,
     /// Path to AppxSip.dll (e.g., `C:\Windows\System32\AppxSip.dll`).
     /// Used to force the correct Subject Interface Package for MSIX signing.
     pub sip_dll: Option<&'a Path>,
@@ -466,15 +489,16 @@ pub struct SignOptions<'a> {
     pub signtool_override: Option<&'a Path>,
 }
 
-/// Signs a .msix package or .msixbundle with a PFX certificate.
+/// Signs a .msix package or .msixbundle using a certificate.
 ///
 /// Invokes SignTool.exe to apply a digital signature using SHA256 hashing.
-/// Optionally adds a timestamp from a timestamp authority server.
+/// Supports both PFX file certificates and certificates from the Windows
+/// certificate store (identified by thumbprint).
 ///
 /// # Arguments
 ///
 /// * `tools` - SDK tools paths (signtool.exe must be available)
-/// * `opts` - Signing options including certificate, password, and timestamp settings
+/// * `opts` - Signing options including certificate source and timestamp settings
 ///
 /// # Errors
 ///
@@ -482,8 +506,11 @@ pub struct SignOptions<'a> {
 /// - SignTool.exe is not found in SDK tools or override path
 /// - SignTool.exe execution fails
 /// - Certificate file is invalid or password is incorrect
+/// - Certificate thumbprint not found in store
 ///
-/// # Example
+/// # Examples
+///
+/// ## Signing with PFX file
 ///
 /// ```no_run
 /// use msixbundle::*;
@@ -495,8 +522,36 @@ pub struct SignOptions<'a> {
 ///
 /// sign_artifact(&tools, &SignOptions {
 ///     artifact: bundle,
-///     pfx: Path::new("./signing.pfx"),
-///     password: Some("password"),
+///     certificate: CertificateSource::Pfx {
+///         path: Path::new("./signing.pfx"),
+///         password: Some("password"),
+///     },
+///     sip_dll: None,
+///     timestamp_url: Some("http://timestamp.digicert.com"),
+///     rfc3161: true,
+///     signtool_override: None,
+/// })?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// ## Signing with certificate thumbprint
+///
+/// ```no_run
+/// use msixbundle::*;
+/// use std::path::Path;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// let tools = locate_sdk_tools()?;
+/// let bundle = Path::new("./output/App_1.0.0.msixbundle");
+///
+/// sign_artifact(&tools, &SignOptions {
+///     artifact: bundle,
+///     certificate: CertificateSource::Thumbprint {
+///         sha1: "1a2b3c4d5e6f...",
+///         store: Some("My"),
+///         machine_store: false,
+///     },
 ///     sip_dll: None,
 ///     timestamp_url: Some("http://timestamp.digicert.com"),
 ///     rfc3161: true,
@@ -511,17 +566,49 @@ pub fn sign_artifact(tools: &SdkTools, opts: &SignOptions<'_>) -> Result<()> {
         .or(tools.signtool.as_deref())
         .ok_or(MsixError::ToolMissing("signtool.exe"))?;
 
-    let mut args: Vec<OsString> = vec![
-        "sign".into(),
-        "/fd".into(),
-        "SHA256".into(),
-        "/f".into(),
-        opts.pfx.as_os_str().into(),
-    ];
-    if let Some(pw) = opts.password {
-        args.push("/p".into());
-        args.push(OsString::from(pw));
+    let args = build_sign_args(opts);
+
+    let status = Command::new(signtool)
+        .args(args)
+        .status()
+        .context("run signtool sign")?;
+    if !status.success() {
+        return Err(MsixError::SignTool(format!("sign {}", opts.artifact.display())).into());
     }
+    Ok(())
+}
+
+/// Builds the command-line arguments for SignTool sign command.
+fn build_sign_args(opts: &SignOptions<'_>) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec!["sign".into(), "/fd".into(), "SHA256".into()];
+
+    // Add certificate-specific arguments
+    match &opts.certificate {
+        CertificateSource::Pfx { path, password } => {
+            args.push("/f".into());
+            args.push(path.as_os_str().into());
+            if let Some(pw) = password {
+                args.push("/p".into());
+                args.push(OsString::from(*pw));
+            }
+        }
+        CertificateSource::Thumbprint {
+            sha1,
+            store,
+            machine_store,
+        } => {
+            args.push("/sha1".into());
+            args.push(OsString::from(*sha1));
+            if let Some(s) = store {
+                args.push("/s".into());
+                args.push(OsString::from(*s));
+            }
+            if *machine_store {
+                args.push("/sm".into());
+            }
+        }
+    }
+
     if let Some(sip) = opts.sip_dll {
         args.push("/dlib".into());
         args.push(sip.as_os_str().into());
@@ -535,14 +622,7 @@ pub fn sign_artifact(tools: &SdkTools, opts: &SignOptions<'_>) -> Result<()> {
     }
     args.push(opts.artifact.as_os_str().into());
 
-    let status = Command::new(signtool)
-        .args(args)
-        .status()
-        .context("run signtool sign")?;
-    if !status.success() {
-        return Err(MsixError::SignTool(format!("sign {}", opts.artifact.display())).into());
-    }
-    Ok(())
+    args
 }
 
 /// Verifies the digital signature of a signed .msix or .msixbundle.
@@ -748,5 +828,245 @@ mod tests {
 
         let info = read_manifest_info(dir.path()).expect("parse manifest");
         assert_eq!(info.display_name, "MyCompany.MyApp");
+    }
+
+    // Helper to convert OsString vec to String vec for easier assertions
+    fn args_to_strings(args: Vec<OsString>) -> Vec<String> {
+        args.into_iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn build_sign_args_pfx_with_password() {
+        let artifact = Path::new("test.msix");
+        let pfx = Path::new("cert.pfx");
+        let opts = SignOptions {
+            artifact,
+            certificate: CertificateSource::Pfx {
+                path: pfx,
+                password: Some("secret"),
+            },
+            sip_dll: None,
+            timestamp_url: None,
+            rfc3161: true,
+            signtool_override: None,
+        };
+        let args = args_to_strings(build_sign_args(&opts));
+        assert_eq!(
+            args,
+            vec![
+                "sign",
+                "/fd",
+                "SHA256",
+                "/f",
+                "cert.pfx",
+                "/p",
+                "secret",
+                "test.msix"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_sign_args_pfx_without_password() {
+        let artifact = Path::new("test.msix");
+        let pfx = Path::new("cert.pfx");
+        let opts = SignOptions {
+            artifact,
+            certificate: CertificateSource::Pfx {
+                path: pfx,
+                password: None,
+            },
+            sip_dll: None,
+            timestamp_url: None,
+            rfc3161: true,
+            signtool_override: None,
+        };
+        let args = args_to_strings(build_sign_args(&opts));
+        assert_eq!(
+            args,
+            vec!["sign", "/fd", "SHA256", "/f", "cert.pfx", "test.msix"]
+        );
+    }
+
+    #[test]
+    fn build_sign_args_thumbprint_default_store() {
+        let artifact = Path::new("test.msix");
+        let opts = SignOptions {
+            artifact,
+            certificate: CertificateSource::Thumbprint {
+                sha1: "ABC123",
+                store: Some("My"),
+                machine_store: false,
+            },
+            sip_dll: None,
+            timestamp_url: None,
+            rfc3161: true,
+            signtool_override: None,
+        };
+        let args = args_to_strings(build_sign_args(&opts));
+        assert_eq!(
+            args,
+            vec![
+                "sign",
+                "/fd",
+                "SHA256",
+                "/sha1",
+                "ABC123",
+                "/s",
+                "My",
+                "test.msix"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_sign_args_thumbprint_custom_store() {
+        let artifact = Path::new("test.msix");
+        let opts = SignOptions {
+            artifact,
+            certificate: CertificateSource::Thumbprint {
+                sha1: "ABC123",
+                store: Some("Root"),
+                machine_store: false,
+            },
+            sip_dll: None,
+            timestamp_url: None,
+            rfc3161: true,
+            signtool_override: None,
+        };
+        let args = args_to_strings(build_sign_args(&opts));
+        assert_eq!(
+            args,
+            vec![
+                "sign",
+                "/fd",
+                "SHA256",
+                "/sha1",
+                "ABC123",
+                "/s",
+                "Root",
+                "test.msix"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_sign_args_thumbprint_machine_store() {
+        let artifact = Path::new("test.msix");
+        let opts = SignOptions {
+            artifact,
+            certificate: CertificateSource::Thumbprint {
+                sha1: "ABC123",
+                store: Some("My"),
+                machine_store: true,
+            },
+            sip_dll: None,
+            timestamp_url: None,
+            rfc3161: true,
+            signtool_override: None,
+        };
+        let args = args_to_strings(build_sign_args(&opts));
+        assert_eq!(
+            args,
+            vec![
+                "sign",
+                "/fd",
+                "SHA256",
+                "/sha1",
+                "ABC123",
+                "/s",
+                "My",
+                "/sm",
+                "test.msix"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_sign_args_thumbprint_no_store() {
+        let artifact = Path::new("test.msix");
+        let opts = SignOptions {
+            artifact,
+            certificate: CertificateSource::Thumbprint {
+                sha1: "ABC123",
+                store: None,
+                machine_store: false,
+            },
+            sip_dll: None,
+            timestamp_url: None,
+            rfc3161: true,
+            signtool_override: None,
+        };
+        let args = args_to_strings(build_sign_args(&opts));
+        assert_eq!(
+            args,
+            vec!["sign", "/fd", "SHA256", "/sha1", "ABC123", "test.msix"]
+        );
+    }
+
+    #[test]
+    fn build_sign_args_with_timestamp_rfc3161() {
+        let artifact = Path::new("test.msix");
+        let pfx = Path::new("cert.pfx");
+        let opts = SignOptions {
+            artifact,
+            certificate: CertificateSource::Pfx {
+                path: pfx,
+                password: None,
+            },
+            sip_dll: None,
+            timestamp_url: Some("http://timestamp.example.com"),
+            rfc3161: true,
+            signtool_override: None,
+        };
+        let args = args_to_strings(build_sign_args(&opts));
+        assert_eq!(
+            args,
+            vec![
+                "sign",
+                "/fd",
+                "SHA256",
+                "/f",
+                "cert.pfx",
+                "/td",
+                "SHA256",
+                "/tr",
+                "http://timestamp.example.com",
+                "test.msix"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_sign_args_with_timestamp_authenticode() {
+        let artifact = Path::new("test.msix");
+        let pfx = Path::new("cert.pfx");
+        let opts = SignOptions {
+            artifact,
+            certificate: CertificateSource::Pfx {
+                path: pfx,
+                password: None,
+            },
+            sip_dll: None,
+            timestamp_url: Some("http://timestamp.example.com"),
+            rfc3161: false,
+            signtool_override: None,
+        };
+        let args = args_to_strings(build_sign_args(&opts));
+        assert_eq!(
+            args,
+            vec![
+                "sign",
+                "/fd",
+                "SHA256",
+                "/f",
+                "cert.pfx",
+                "/t",
+                "http://timestamp.example.com",
+                "test.msix"
+            ]
+        );
     }
 }

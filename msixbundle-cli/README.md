@@ -21,7 +21,7 @@ msixbundle-cli \
   --dir-arm64 ./build/arm64/AppxContent
 ```
 
-### Build and Sign
+### Build and Sign with PFX
 
 ```bash
 msixbundle-cli \
@@ -32,6 +32,30 @@ msixbundle-cli \
   --pfx-password "YourPassword" \
   --timestamp-url http://timestamp.digicert.com \
   --timestamp-mode rfc3161
+```
+
+### Build and Sign with Certificate Thumbprint
+
+Sign using a certificate from the Windows certificate store:
+
+```bash
+msixbundle-cli \
+  --out-dir ./output \
+  --dir-x64 ./build/x64/AppxContent \
+  --dir-arm64 ./build/arm64/AppxContent \
+  --thumbprint "1a2b3c4d5e6f..." \
+  --cert-store My \
+  --timestamp-url http://timestamp.digicert.com
+```
+
+For certificates in the machine store:
+
+```bash
+msixbundle-cli \
+  --out-dir ./output \
+  --dir-x64 ./build/x64/AppxContent \
+  --thumbprint "1a2b3c4d5e6f..." \
+  --machine-store
 ```
 
 ### Sign Individual Packages
@@ -68,8 +92,11 @@ msixbundle-cli \
 | `--out-dir` | Output directory for generated .msix and .msixbundle files |
 | `--dir-x64` | Path to x64 AppxContent directory containing AppxManifest.xml |
 | `--dir-arm64` | Path to ARM64 AppxContent directory |
-| `--pfx` | Path to PFX certificate file for signing |
+| `--pfx` | Path to PFX certificate file for signing (mutually exclusive with `--thumbprint`) |
 | `--pfx-password` | Password for the PFX certificate |
+| `--thumbprint` | Certificate thumbprint (SHA1) from Windows cert store (mutually exclusive with `--pfx`) |
+| `--cert-store` | Certificate store name (default: `My`). Common: "My" (Personal), "Root", "CA". See [SignTool docs](https://learn.microsoft.com/en-us/dotnet/framework/tools/signtool-exe) |
+| `--machine-store` | Use machine certificate store instead of user store |
 | `--sign-each` | Sign individual architecture packages (not just the bundle) |
 | `--signtool-path` | Override path to signtool.exe |
 | `--sip-dll` | Path to Appx SIP DLL (e.g., `C:\Windows\System32\AppxSip.dll`) |

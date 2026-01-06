@@ -20,13 +20,26 @@ struct Args {
     #[arg(long)]
     dir_arm64: Option<PathBuf>,
 
-    /// Sign PFX (if omitted, no signing)
-    #[arg(long)]
+    /// PFX certificate file for signing (mutually exclusive with --thumbprint)
+    #[arg(long, conflicts_with = "thumbprint")]
     pfx: Option<PathBuf>,
 
     /// PFX password
-    #[arg(long)]
+    #[arg(long, requires = "pfx")]
     pfx_password: Option<String>,
+
+    /// Certificate thumbprint (SHA1) from Windows cert store (mutually exclusive with --pfx)
+    #[arg(long, conflicts_with = "pfx")]
+    thumbprint: Option<String>,
+
+    /// Certificate store name. Common: "My" (Personal), "Root", "CA".
+    /// See: https://learn.microsoft.com/en-us/dotnet/framework/tools/signtool-exe
+    #[arg(long, default_value = "My", requires = "thumbprint")]
+    cert_store: String,
+
+    /// Use machine certificate store instead of user store
+    #[arg(long, requires = "thumbprint")]
+    machine_store: bool,
 
     /// Also sign per-arch .msix
     #[arg(long, default_value_t = false)]
@@ -133,16 +146,31 @@ fn main() -> Result<()> {
         }
     }
 
+    // Determine certificate source for signing
+    let cert_source: Option<CertificateSource> = if let Some(pfx) = &a.pfx {
+        Some(CertificateSource::Pfx {
+            path: pfx,
+            password: a.pfx_password.as_deref(),
+        })
+    } else if let Some(thumbprint) = &a.thumbprint {
+        Some(CertificateSource::Thumbprint {
+            sha1: thumbprint,
+            store: Some(a.cert_store.as_str()),
+            machine_store: a.machine_store,
+        })
+    } else {
+        None
+    };
+
     // Sign per-arch (optional, often skipped)
     if a.sign_each {
-        if let (Some(pfx), Some(pass)) = (&a.pfx, &a.pfx_password) {
+        if let Some(ref cert) = cert_source {
             for (_, msix) in &built {
                 sign_artifact(
                     &tools,
                     &SignOptions {
                         artifact: msix,
-                        pfx,
-                        password: Some(pass),
+                        certificate: cert.clone(),
                         sip_dll: a.sip_dll.as_deref(),
                         timestamp_url: None, // usually skip timestamp on inner packages
                         rfc3161: true,
@@ -154,7 +182,7 @@ fn main() -> Result<()> {
                 }
             }
         } else {
-            warn!("--sign-each set but no --pfx/--pfx-password; skipping per-arch signing");
+            warn!("--sign-each set but no --pfx or --thumbprint; skipping per-arch signing");
         }
     }
 
@@ -163,7 +191,7 @@ fn main() -> Result<()> {
     info!("bundle: {}", bundle.display());
 
     // Sign bundle
-    if let (Some(pfx), Some(pass)) = (&a.pfx, &a.pfx_password) {
+    if let Some(ref cert) = cert_source {
         let ts = if a.timestamp_url.is_empty() {
             None
         } else {
@@ -173,8 +201,7 @@ fn main() -> Result<()> {
             &tools,
             &SignOptions {
                 artifact: &bundle,
-                pfx,
-                password: Some(pass),
+                certificate: cert.clone(),
                 sip_dll: a.sip_dll.as_deref(),
                 timestamp_url: ts,
                 rfc3161: a.timestamp_mode.eq_ignore_ascii_case("rfc3161"),
