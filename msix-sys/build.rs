@@ -78,6 +78,16 @@ fn build_sdk(sdk_dir: &Path, out_dir: &Path) -> PathBuf {
         format!("-L{} -lz", zlib_lib.display()),
     );
 
+    // Configure OpenSSL from openssl-sys
+    let openssl_include =
+        env::var("DEP_OPENSSL_INCLUDE").expect("DEP_OPENSSL_INCLUDE not set by openssl-sys");
+    let openssl_root = PathBuf::from(&openssl_include)
+        .parent()
+        .expect("OpenSSL include path has no parent")
+        .to_path_buf();
+    cmake_config.define("OPENSSL_INCLUDE_DIR", &openssl_include);
+    cmake_config.define("OPENSSL_ROOT_DIR", &openssl_root);
+
     cmake_config
         .define("MSIX_PACK", "ON")
         .define("USE_VALIDATION_PARSER", "ON")
@@ -90,19 +100,18 @@ fn build_sdk(sdk_dir: &Path, out_dir: &Path) -> PathBuf {
     // Platform-specific configuration
     let target = env::var("TARGET").expect("TARGET not set");
 
+    cmake_config.define("CRYPTO_LIB", "openssl");
+
     if target.contains("windows") {
         cmake_config.define("WIN32", "ON");
         cmake_config.define("USE_STATIC_MSVC", "ON");
         cmake_config.define("XML_PARSER", "msxml6");
-        cmake_config.define("CRYPTO_LIB", "crypt32");
     } else if target.contains("apple") {
         cmake_config.define("MACOS", "ON");
         cmake_config.define("XML_PARSER", "applexml");
-        cmake_config.define("CRYPTO_LIB", "openssl");
     } else if target.contains("linux") {
         cmake_config.define("LINUX", "ON");
         cmake_config.define("XML_PARSER", "xerces");
-        cmake_config.define("CRYPTO_LIB", "openssl");
     }
 
     let dst = cmake_config.build();
@@ -119,6 +128,7 @@ fn generate_bindings(sdk_dir: &Path, out_dir: &Path) {
     let bindings = bindgen::Builder::default()
         .header(header.to_str().expect("Header path is not valid UTF-8"))
         .clang_arg(format!("-I{}", header_dir.display()))
+        .clang_arg("-DMSIX_PACK")
         // Only generate bindings for the functions we need
         .allowlist_function("PackPackage")
         .allowlist_function("UnpackPackage")
@@ -152,33 +162,17 @@ fn generate_bindings(sdk_dir: &Path, out_dir: &Path) {
 fn link_platform_dependencies() {
     let target = env::var("TARGET").expect("TARGET not set");
 
+    println!("cargo:rustc-link-lib=z");
+
     if target.contains("windows") {
         println!("cargo:rustc-link-lib=oleaut32");
         println!("cargo:rustc-link-lib=ole32");
-        println!("cargo:rustc-link-lib=bcrypt");
-        println!("cargo:rustc-link-lib=crypt32");
         println!("cargo:rustc-link-lib=shlwapi");
-        println!("cargo:rustc-link-lib=z");
     } else if target.contains("apple") {
         println!("cargo:rustc-link-lib=framework=CoreFoundation");
-        println!("cargo:rustc-link-lib=framework=Security");
         println!("cargo:rustc-link-lib=c++");
-        // zlib is required for compression
-        println!("cargo:rustc-link-lib=z");
-        // OpenSSL is required on macOS
-        if let Ok(openssl_dir) = env::var("OPENSSL_DIR") {
-            println!("cargo:rustc-link-search=native={}/lib", openssl_dir);
-        }
-        println!("cargo:rustc-link-lib=ssl");
-        println!("cargo:rustc-link-lib=crypto");
     } else if target.contains("linux") {
         println!("cargo:rustc-link-lib=stdc++");
-        // zlib is required for compression
-        println!("cargo:rustc-link-lib=z");
-        // Xerces-C is required on Linux
         println!("cargo:rustc-link-lib=xerces-c");
-        // OpenSSL is required on Linux
-        println!("cargo:rustc-link-lib=ssl");
-        println!("cargo:rustc-link-lib=crypto");
     }
 }
