@@ -2,6 +2,7 @@
 members = [
     "msixbundle",
     "msixbundle-cli",
+    "msix-sys",
 ]
 resolver = "2"
 
