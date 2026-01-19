@@ -609,19 +609,18 @@ fn setup_test_certificate(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf
     let cer_path = dir.join("APPX_TEST_ROOT.cer");
 
     let script = format!(
-        r#"
-        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=MSIX Test Root" -KeyUsage DigitalSignature -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(1)
-        Export-PfxCertificate -Cert $cert -FilePath "{}" -Password (ConvertTo-SecureString -String "test" -Force -AsPlainText)
-        Export-Certificate -Cert $cert -FilePath "{}"
-        "#,
+        r#"$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=MSIX Test Root" -CertStoreLocation Cert:\CurrentUser\My
+$pwd = ConvertTo-SecureString -String "test" -Force -AsPlainText
+Export-PfxCertificate -Cert $cert -FilePath "{}" -Password $pwd
+Export-Certificate -Cert $cert -FilePath "{}""#,
         pfx_path.display(),
         cer_path.display()
     );
 
-    let status = std::process::Command::new("powershell")
+    let status = std::process::Command::new("pwsh")
         .args(["-Command", &script])
         .status()
-        .expect("Failed to run PowerShell");
+        .expect("Failed to run pwsh");
 
     assert!(status.success(), "Failed to generate test certificate");
     assert!(pfx_path.exists(), "PFX file should exist");
