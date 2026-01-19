@@ -65,9 +65,15 @@ jobs:
           $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Test" -CertStoreLocation Cert:\CurrentUser\My
           $pwd = ConvertTo-SecureString -String "TestPass123" -Force -AsPlainText
           Export-PfxCertificate -Cert $cert -FilePath test.pfx -Password $pwd
+          Export-Certificate -Cert $cert -FilePath test.cer
 
-      - name: Test CLI with signing
+      - name: Add certificate to root store
         shell: pwsh
         run: |
-          msixbundle-cli --out-dir ./output-signed --dir-x64 ./test-content-x64 --pfx ./test.pfx --pfx-password TestPass123 --timestamp-url ""
+          certutil -addstore root test.cer
+
+      - name: Test CLI with signing and verification
+        shell: pwsh
+        run: |
+          msixbundle-cli --out-dir ./output-signed --dir-x64 ./test-content-x64 --pfx ./test.pfx --pfx-password TestPass123 --timestamp-url "" --verify
           if (!(Test-Path ./output-signed/*.msixbundle)) { exit 1 }

@@ -45,6 +45,24 @@ use std::{
 };
 use thiserror::Error;
 
+/// Dotted-quad version for SDK folder parsing (e.g., "10.0.19041.0").
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+struct Version4(u32, u32, u32, u32);
+
+impl Version4 {
+    fn parse(s: &str) -> Result<Self, ()> {
+        let mut it = s.split('.');
+        let a = it.next().ok_or(())?.parse().map_err(|_| ())?;
+        let b = it.next().ok_or(())?.parse().map_err(|_| ())?;
+        let c = it.next().ok_or(())?.parse().map_err(|_| ())?;
+        let d = it.next().ok_or(())?.parse().map_err(|_| ())?;
+        if it.next().is_some() {
+            return Err(());
+        }
+        Ok(Self(a, b, c, d))
+    }
+}
+
 /// Errors that can occur during MSIX packaging operations.
 #[derive(Debug, Error)]
 pub enum MsixError {
@@ -739,23 +757,6 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // dotted-quad version for SDK folders
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-    struct Version4(u32, u32, u32, u32);
-    impl Version4 {
-        fn parse(s: &str) -> Result<Self, ()> {
-            let mut it = s.split('.');
-            let a = it.next().ok_or(())?.parse().map_err(|_| ())?;
-            let b = it.next().ok_or(())?.parse().map_err(|_| ())?;
-            let c = it.next().ok_or(())?.parse().map_err(|_| ())?;
-            let d = it.next().ok_or(())?.parse().map_err(|_| ())?;
-            if it.next().is_some() {
-                return Err(());
-            }
-            Ok(Self(a, b, c, d))
-        }
-    }
 
     #[test]
     fn sanitize_removes_invalid_chars() {
