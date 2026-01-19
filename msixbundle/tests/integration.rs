@@ -603,3 +603,75 @@ fn test_build_bundle_overwrite_true_succeeds_when_exists() {
     assert!(bundle2.exists());
     assert_eq!(bundle1, bundle2, "should produce same path");
 }
+
+fn setup_test_certificate(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let pfx_path = dir.join("APPX_TEST_ROOT.pfx");
+    let cer_path = dir.join("APPX_TEST_ROOT.cer");
+
+    let status = std::process::Command::new("powershell")
+        .args([
+            "-Command",
+            r#"
+            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=MSIX Test Root" -KeyUsage DigitalSignature -CertStoreLocation "Cert:\CurrentUser\My" -NotAfter (Get-Date).AddYears(1)
+            Export-PfxCertificate -Cert $cert -FilePath $args[0] -Password (ConvertTo-SecureString -String "test" -Force -AsPlainText)
+            Export-Certificate -Cert $cert -FilePath $args[1]
+            "#,
+        ])
+        .arg(&pfx_path)
+        .arg(&cer_path)
+        .status()
+        .expect("Failed to run PowerShell");
+
+    assert!(status.success(), "Failed to generate test certificate");
+    assert!(pfx_path.exists(), "PFX file should exist");
+    assert!(cer_path.exists(), "CER file should exist");
+
+    (pfx_path, cer_path)
+}
+
+#[test]
+fn test_sign_and_verify() {
+    let tools = locate_sdk_tools().expect("locate SDK");
+    let temp = tempdir().expect("create temp dir");
+
+    // 1. Generate test certificate
+    let (pfx_path, cer_path) = setup_test_certificate(temp.path());
+
+    // 2. Add certificate to root store (GitHub Actions runs as admin)
+    let add_status = std::process::Command::new("certutil")
+        .args(["-addstore", "root"])
+        .arg(&cer_path)
+        .status()
+        .expect("Failed to run certutil");
+    assert!(add_status.success(), "Failed to add cert to root store");
+
+    // 3. Create and pack a test MSIX
+    let content_dir = temp.path().join("content");
+    std::fs::create_dir_all(&content_dir).expect("create content dir");
+    create_minimal_appx_content(&content_dir);
+    let info = read_manifest_info(&content_dir).expect("read manifest");
+
+    let msix_path = pack_arch(&tools, &content_dir, temp.path(), &info, "x64", true).expect("pack");
+
+    // 4. Sign with PFX
+    let sign_opts = SignOptions {
+        artifact: &msix_path,
+        certificate: CertificateSource::Pfx {
+            path: &pfx_path,
+            password: Some("test"),
+        },
+        sip_dll: None,
+        timestamp_url: None,
+        rfc3161: false,
+        signtool_override: None,
+    };
+    sign_artifact(&tools, &sign_opts).expect("sign artifact");
+
+    // 5. Verify signature
+    verify_signature(&tools, &msix_path).expect("verify signature");
+
+    // 6. Cleanup: remove cert from root store
+    let _ = std::process::Command::new("certutil")
+        .args(["-delstore", "root", "MSIX Test Root"])
+        .status();
+}
