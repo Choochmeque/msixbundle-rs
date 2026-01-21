@@ -5,8 +5,14 @@
 
 version: 2
 updates:
-  # Enable version updates for npm
+  # Enable version updates for cargo
   - package-ecosystem: "cargo"
-    directory: "/"
+    directory: "/msixbundle"
+    schedule:
+      interval: "weekly"
+
+  # Enable version updates for cargo (cli)
+  - package-ecosystem: "cargo"
+    directory: "/msixbundle-cli"
     schedule:
       interval: "weekly"
