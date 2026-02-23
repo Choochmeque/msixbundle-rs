@@ -61,6 +61,26 @@ struct Args {
     #[arg(long, value_parser = ["rfc3161","authenticode"], default_value = "rfc3161")]
     timestamp_mode: String,
 
+    /// Generate resources.pri with MakePri before packing
+    #[arg(long)]
+    makepri: bool,
+
+    /// Override makepri.exe path
+    #[arg(long, requires = "makepri")]
+    makepri_path: Option<PathBuf>,
+
+    /// Default resource language for MakePri (for example: en-us)
+    #[arg(long, requires = "makepri")]
+    makepri_default_language: Option<String>,
+
+    /// Target OS version for MakePri /pv (for example: 10.0.0)
+    #[arg(long, requires = "makepri")]
+    makepri_target_os_version: Option<String>,
+
+    /// Keep generated priconfig.xml after MakePri
+    #[arg(long, requires = "makepri")]
+    makepri_keep_config: bool,
+
     /// Validate packages with MakeAppx after build
     #[arg(long)]
     validate: bool,
@@ -106,6 +126,12 @@ fn main() -> Result<()> {
     if let Some(p) = &a.signtool_path {
         tools.signtool = Some(p.clone());
     }
+    if let Some(p) = &a.makepri_path {
+        tools.makepri = Some(p.clone());
+    }
+
+    let makepri_default_language = a.makepri_default_language.as_deref().unwrap_or("en-us");
+    let makepri_target_os_version = a.makepri_target_os_version.as_deref().unwrap_or("10.0.0");
 
     // Pack per-arch
     let mut built: Vec<(String, PathBuf)> = Vec::new();
@@ -114,6 +140,20 @@ fn main() -> Result<()> {
     if let Some(dir) = &a.dir_x64 {
         let dir = resolve_path(dir)?;
         let m = read_manifest_info(&dir)?;
+        if a.makepri {
+            let pri = compile_resources_pri(
+                &tools,
+                &PriOptions {
+                    appx_content_dir: &dir,
+                    default_language: makepri_default_language,
+                    target_os_version: makepri_target_os_version,
+                    keep_priconfig: a.makepri_keep_config,
+                    overwrite: a.force,
+                    makepri_override: None,
+                },
+            )?;
+            info!("x64 PRI: {}", pri.display());
+        }
         info = Some(m.clone());
         info!("x64: {}", dir.display());
         let msix = pack_arch(&tools, &dir, &out_dir, &m, "x64", a.force)?;
@@ -133,6 +173,20 @@ fn main() -> Result<()> {
             }
         } else {
             info = Some(m.clone());
+        }
+        if a.makepri {
+            let pri = compile_resources_pri(
+                &tools,
+                &PriOptions {
+                    appx_content_dir: &dir,
+                    default_language: makepri_default_language,
+                    target_os_version: makepri_target_os_version,
+                    keep_priconfig: a.makepri_keep_config,
+                    overwrite: a.force,
+                    makepri_override: None,
+                },
+            )?;
+            info!("arm64 PRI: {}", pri.display());
         }
         info!("arm64: {}", dir.display());
         let msix = pack_arch(&tools, &dir, &out_dir, &m, "arm64", a.force)?;
