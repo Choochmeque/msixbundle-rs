@@ -70,12 +70,12 @@ struct Args {
     makepri_path: Option<PathBuf>,
 
     /// Default resource language for MakePri (for example: en-us)
-    #[arg(long, requires = "makepri")]
-    makepri_default_language: Option<String>,
+    #[arg(long, default_value = "en-us", requires = "makepri")]
+    makepri_default_language: String,
 
     /// Target OS version for MakePri /pv (for example: 10.0.0)
-    #[arg(long, requires = "makepri")]
-    makepri_target_os_version: Option<String>,
+    #[arg(long, default_value = "10.0.0", requires = "makepri")]
+    makepri_target_os_version: String,
 
     /// Keep generated priconfig.xml after MakePri
     #[arg(long, requires = "makepri")]
@@ -130,9 +130,6 @@ fn main() -> Result<()> {
         tools.makepri = Some(p.clone());
     }
 
-    let makepri_default_language = a.makepri_default_language.as_deref().unwrap_or("en-us");
-    let makepri_target_os_version = a.makepri_target_os_version.as_deref().unwrap_or("10.0.0");
-
     // Pack per-arch
     let mut built: Vec<(String, PathBuf)> = Vec::new();
     let mut info: Option<ManifestInfo> = None;
@@ -145,8 +142,8 @@ fn main() -> Result<()> {
                 &tools,
                 &PriOptions {
                     appx_content_dir: &dir,
-                    default_language: makepri_default_language,
-                    target_os_version: makepri_target_os_version,
+                    default_language: a.makepri_default_language.as_str(),
+                    target_os_version: a.makepri_target_os_version.as_str(),
                     keep_priconfig: a.makepri_keep_config,
                     overwrite: a.force,
                     makepri_override: None,
@@ -179,8 +176,8 @@ fn main() -> Result<()> {
                 &tools,
                 &PriOptions {
                     appx_content_dir: &dir,
-                    default_language: makepri_default_language,
-                    target_os_version: makepri_target_os_version,
+                    default_language: a.makepri_default_language.as_str(),
+                    target_os_version: a.makepri_target_os_version.as_str(),
                     keep_priconfig: a.makepri_keep_config,
                     overwrite: a.force,
                     makepri_override: None,
