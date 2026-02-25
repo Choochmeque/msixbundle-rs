@@ -173,7 +173,7 @@ pub struct SdkTools {
 /// ```
 #[cfg(all(feature = "sdk-discovery", target_os = "windows"))]
 pub fn locate_sdk_tools() -> Result<SdkTools> {
-    use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
+    use winreg::{RegKey, enums::HKEY_LOCAL_MACHINE};
     let roots = RegKey::predef(HKEY_LOCAL_MACHINE)
         .open_subkey("SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots")
         .context("open Windows Kits registry")?;
@@ -206,19 +206,11 @@ pub fn locate_sdk_tools() -> Result<SdkTools> {
     let makeappx = base.join("x64").join("MakeAppx.exe");
     let signtool = {
         let p = base.join("x64").join("signtool.exe");
-        if p.exists() {
-            Some(p)
-        } else {
-            None
-        }
+        if p.exists() { Some(p) } else { None }
     };
     let makepri = {
         let p = base.join("x64").join("makepri.exe");
-        if p.exists() {
-            Some(p)
-        } else {
-            None
-        }
+        if p.exists() { Some(p) } else { None }
     };
     // WACK (Windows App Certification Kit) is in a separate directory
     let appcert = {
@@ -226,11 +218,7 @@ pub fn locate_sdk_tools() -> Result<SdkTools> {
         let p = PathBuf::from(kits_root10)
             .join("App Certification Kit")
             .join("appcert.exe");
-        if p.exists() {
-            Some(p)
-        } else {
-            None
-        }
+        if p.exists() { Some(p) } else { None }
     };
     Ok(SdkTools {
         makeappx,
@@ -326,11 +314,7 @@ fn sanitize(s: &str) -> String {
             out.push(ch);
         }
     }
-    if out.is_empty() {
-        "App".into()
-    } else {
-        out
-    }
+    if out.is_empty() { "App".into() } else { out }
 }
 
 /// Options for compiling `resources.pri` with MakePri.exe.

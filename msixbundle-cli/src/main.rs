@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Parser;
 use log::{info, warn};
 use std::path::PathBuf;
@@ -112,7 +112,9 @@ fn resolve_path(p: &std::path::Path) -> Result<PathBuf> {
 fn main() -> Result<()> {
     let a = Args::parse();
     if a.verbose {
-        std::env::set_var("RUST_LOG", "info");
+        unsafe {
+            std::env::set_var("RUST_LOG", "info");
+        }
     }
     env_logger::init();
 

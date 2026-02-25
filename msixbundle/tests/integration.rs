@@ -161,11 +161,13 @@ fn test_build_bundle() {
     );
 
     // Verify AppxBundleManifest.xml exists and is valid
-    assert!(unbundle_dir
-        .path()
-        .join("AppxMetadata")
-        .join("AppxBundleManifest.xml")
-        .exists());
+    assert!(
+        unbundle_dir
+            .path()
+            .join("AppxMetadata")
+            .join("AppxBundleManifest.xml")
+            .exists()
+    );
     let bundle_manifest = std::fs::read_to_string(
         unbundle_dir
             .path()
