@@ -16,4 +16,4 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
-msixbundle = { path = "../msixbundle", version = "1.1.0" }
+msixbundle = { path = "../msixbundle", version = "1.1.4" }
