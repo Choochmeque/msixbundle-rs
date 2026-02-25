@@ -105,5 +105,6 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 - [MSIX Documentation](https://docs.microsoft.com/en-us/windows/msix/)
 - [MakeAppx.exe Tool Reference](https://docs.microsoft.com/en-us/windows/msix/package/create-app-package-with-makeappx-tool)
 - [SignTool.exe Documentation](https://docs.microsoft.com/en-us/windows/win32/seccrypto/signtool)
+- [MakePri.exe Tool Reference](https://learn.microsoft.com/en-us/windows/uwp/app-resources/compile-resources-manually-with-makepri)
 - [Windows App Certification Kit (WACK)](https://docs.microsoft.com/en-us/windows/uwp/debug-test-perf/windows-app-certification-kit)
 - [AppxManifest Schema](https://docs.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/schema-root)
