@@ -54,7 +54,7 @@ msixbundle-cli \
 
 ```toml
 [dependencies]
-msixbundle = "1.0"
+msixbundle = "1.1"
 ```
 
 ```rust
