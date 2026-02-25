@@ -17,7 +17,8 @@ A Rust library and CLI tool for building and signing Windows MSIX packages and M
 
 - **Multi-architecture support**: Build separate MSIX packages for x64 and ARM64 architectures
 - **Automatic bundle creation**: Combine per-architecture packages into a single `.msixbundle`
-- **SDK auto-discovery**: Automatically locate Windows SDK tools (`MakeAppx.exe`, `signtool.exe`, `appcert.exe`) via registry
+- **SDK auto-discovery**: Automatically locate Windows SDK tools (`MakeAppx.exe`, `makepri.exe`, `signtool.exe`, `appcert.exe`) via registry
+- **Resource indexing**: Optionally generate `resources.pri` with `makepri.exe` for qualified assets
 - **Code signing**: Sign packages and bundles with PFX certificates
 - **Timestamping**: Support for both RFC3161 and Authenticode timestamp protocols
 - **Validation**: Validate packages using Windows App Certification Kit (WACK) and verify signatures
@@ -26,7 +27,7 @@ A Rust library and CLI tool for building and signing Windows MSIX packages and M
 ## Requirements
 
 - **Windows OS**: This tool requires Windows and the Windows SDK
-- **Windows SDK 10**: MakeAppx.exe and signtool.exe must be installed
+- **Windows SDK 10**: MakeAppx.exe, MakePri.exe and signtool.exe must be installed
   - Install via [Visual Studio](https://visualstudio.microsoft.com/) or [standalone SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/)
 - **Windows App Certification Kit (WACK)**: Required for validation (appcert.exe)
   - Installed automatically with the Windows SDK
@@ -84,11 +85,12 @@ msixbundle-rs/
 ## How It Works
 
 1. **Manifest Parsing**: Reads `AppxManifest.xml` from each architecture directory to extract version and identity information
-2. **Package Creation**: Uses `MakeAppx.exe` to create `.msix` files for each architecture
-3. **Bundle Mapping**: Generates a `bundlemap.txt` file listing all architecture packages
-4. **Bundle Creation**: Uses `MakeAppx.exe` to combine packages into a `.msixbundle`
-5. **Signing**: Uses `signtool.exe` to apply digital signatures with optional timestamping
-6. **Validation**: Optionally validates packages with WACK and verifies signature validity
+2. **Resource Indexing (optional)**: Uses `makepri.exe` to generate `resources.pri`
+3. **Package Creation**: Uses `MakeAppx.exe` to create `.msix` files for each architecture
+4. **Bundle Mapping**: Generates a `bundlemap.txt` file listing all architecture packages
+5. **Bundle Creation**: Uses `MakeAppx.exe` to combine packages into a `.msixbundle`
+6. **Signing**: Uses `signtool.exe` to apply digital signatures with optional timestamping
+7. **Validation**: Optionally validates packages with WACK and verifies signature validity
 
 ## Contributing
 

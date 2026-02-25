@@ -261,6 +261,35 @@ fn test_multi_arch_bundle() {
     create_appx_content_for_arch(x64_dir.path(), "x64");
     create_appx_content_for_arch(arm64_dir.path(), "arm64");
 
+    // Generate resources.pri when MakePri is available.
+    if tools.makepri.is_some() {
+        compile_resources_pri(
+            &tools,
+            &PriOptions {
+                appx_content_dir: x64_dir.path(),
+                default_language: "en-us",
+                target_os_version: "10.0.0",
+                keep_priconfig: false,
+                overwrite: true,
+                makepri_override: None,
+            },
+        )
+        .expect("compile x64 resources.pri");
+
+        compile_resources_pri(
+            &tools,
+            &PriOptions {
+                appx_content_dir: arm64_dir.path(),
+                default_language: "en-us",
+                target_os_version: "10.0.0",
+                keep_priconfig: false,
+                overwrite: true,
+                makepri_override: None,
+            },
+        )
+        .expect("compile arm64 resources.pri");
+    }
+
     let info = read_manifest_info(x64_dir.path()).expect("read manifest");
 
     // Pack both architectures
@@ -385,6 +414,37 @@ fn test_read_manifest_missing_file() {
 }
 
 #[test]
+fn test_compile_resources_pri() {
+    let tools = locate_sdk_tools().expect("locate SDK");
+    if tools.makepri.is_none() {
+        eprintln!("Skipping test_compile_resources_pri: makepri.exe not found");
+        return;
+    }
+
+    let content_dir = tempdir().expect("create content dir");
+    create_minimal_appx_content(content_dir.path());
+
+    let pri = compile_resources_pri(
+        &tools,
+        &PriOptions {
+            appx_content_dir: content_dir.path(),
+            default_language: "en-us",
+            target_os_version: "10.0.0",
+            keep_priconfig: false,
+            overwrite: true,
+            makepri_override: None,
+        },
+    )
+    .expect("compile resources.pri");
+
+    assert!(pri.exists(), "resources.pri should be generated");
+    assert!(
+        !content_dir.path().join("priconfig.xml").exists(),
+        "priconfig.xml should be cleaned up by default"
+    );
+}
+
+#[test]
 fn test_read_manifest_invalid_xml() {
     let dir = tempdir().expect("create temp dir");
     std::fs::write(dir.path().join("AppxManifest.xml"), "not valid xml <><>").expect("write");
@@ -441,6 +501,35 @@ fn test_validate_msix_and_bundle() {
     // Create content for both architectures
     create_appx_content_for_arch(x64_dir.path(), "x64");
     create_appx_content_for_arch(arm64_dir.path(), "arm64");
+
+    // Generate resources.pri when MakePri is available.
+    if tools.makepri.is_some() {
+        compile_resources_pri(
+            &tools,
+            &PriOptions {
+                appx_content_dir: x64_dir.path(),
+                default_language: "en-us",
+                target_os_version: "10.0.0",
+                keep_priconfig: false,
+                overwrite: true,
+                makepri_override: None,
+            },
+        )
+        .expect("compile x64 resources.pri");
+
+        compile_resources_pri(
+            &tools,
+            &PriOptions {
+                appx_content_dir: arm64_dir.path(),
+                default_language: "en-us",
+                target_os_version: "10.0.0",
+                keep_priconfig: false,
+                overwrite: true,
+                makepri_override: None,
+            },
+        )
+        .expect("compile arm64 resources.pri");
+    }
 
     let info = read_manifest_info(x64_dir.path()).expect("read manifest");
 

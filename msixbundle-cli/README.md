@@ -72,6 +72,19 @@ msixbundle-cli \
   --pfx-password "secret"
 ```
 
+### Generate resources.pri with MakePri
+
+Generate `resources.pri` before packing (useful for scale-qualified assets such as `SquareLogo.scale-200.png`):
+
+```bash
+msixbundle-cli \
+  --out-dir ./output \
+  --dir-x64 ./build/x64/AppxContent \
+  --makepri \
+  --makepri-default-language en-us \
+  --makepri-target-os-version 10.0.0
+```
+
 ### With Validation and Verification
 
 ```bash
@@ -102,6 +115,11 @@ msixbundle-cli \
 | `--sip-dll` | Path to Appx SIP DLL (e.g., `C:\Windows\System32\AppxSip.dll`) |
 | `--timestamp-url` | Timestamp server URL (default: `http://timestamp.digicert.com`) |
 | `--timestamp-mode` | Timestamping protocol: `rfc3161` or `authenticode` (default: `rfc3161`) |
+| `--makepri` | Generate `resources.pri` with MakePri before packing |
+| `--makepri-path` | Override path to `makepri.exe` |
+| `--makepri-default-language` | Default language qualifier for MakePri (example: `en-us`) |
+| `--makepri-target-os-version` | MakePri `/pv` target OS version (example: `10.0.0`) |
+| `--makepri-keep-config` | Keep generated `priconfig.xml` files |
 | `--validate` | Validate packages using WACK (Windows App Certification Kit) |
 | `--verify` | Verify signatures with SignTool after signing |
 | `--verbose` | Enable verbose logging (sets `RUST_LOG=info`) |
@@ -157,6 +175,7 @@ openssl pkcs12 -export -out test-certificate.pfx -inkey private.key -in certific
 
 - Windows OS with Windows SDK 10 installed
 - MakeAppx.exe and signtool.exe
+- makepri.exe (optional, required only with `--makepri`)
 - WACK (appcert.exe) for `--validate` option
 
 ## License

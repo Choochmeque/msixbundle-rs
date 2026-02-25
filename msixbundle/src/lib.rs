@@ -11,6 +11,7 @@
 //! - Bundle creation from multiple architecture packages
 //! - Code signing with PFX certificates or certificate store thumbprints
 //! - Timestamping support (RFC3161 and Authenticode)
+//! - Resource index generation (`resources.pri`) with MakePri.exe
 //! - Package validation and signature verification
 //!
 //! # Example
@@ -75,6 +76,9 @@ pub enum MsixError {
     /// SignTool.exe operation failed (sign or verify).
     #[error("SignTool failed: {0}")]
     SignTool(String),
+    /// MakePri.exe operation failed (createconfig or new).
+    #[error("MakePri failed: {0}")]
+    MakePri(String),
     /// Failed to parse AppxManifest.xml.
     #[error("Manifest parse error: {0}")]
     Manifest(String),
@@ -111,14 +115,16 @@ pub enum CertificateSource<'a> {
     },
 }
 
-/// Paths to Windows SDK tools (MakeAppx.exe, SignTool.exe, and appcert.exe).
+/// Paths to Windows SDK tools (MakeAppx.exe, MakePri.exe, SignTool.exe, and appcert.exe).
 ///
 /// This struct holds the absolute paths to the Windows SDK executables needed
-/// for creating, signing, and validating MSIX packages.
+/// for creating, indexing resources, signing, and validating MSIX packages.
 #[derive(Clone, Debug)]
 pub struct SdkTools {
     /// Path to MakeAppx.exe (required for pack and bundle operations).
     pub makeappx: PathBuf,
+    /// Path to MakePri.exe (optional, only needed for resources.pri generation).
+    pub makepri: Option<PathBuf>,
     /// Path to SignTool.exe (optional, only needed for signing operations).
     pub signtool: Option<PathBuf>,
     /// Path to appcert.exe (optional, only needed for WACK validation).
@@ -128,7 +134,7 @@ pub struct SdkTools {
 /// Automatically locates Windows SDK tools on the system.
 ///
 /// Searches the Windows registry for installed Windows SDK versions and returns
-/// paths to the latest version of MakeAppx.exe and SignTool.exe found in the
+/// paths to the latest version of MakeAppx.exe, MakePri.exe, and SignTool.exe found in the
 /// `C:\Program Files (x86)\Windows Kits\10\bin\` directory.
 ///
 /// # Requirements
@@ -139,7 +145,8 @@ pub struct SdkTools {
 ///
 /// # Returns
 ///
-/// Returns [`SdkTools`] containing paths to MakeAppx.exe and optionally SignTool.exe.
+/// Returns [`SdkTools`] containing paths to MakeAppx.exe and optionally
+/// MakePri.exe, SignTool.exe, and appcert.exe.
 ///
 /// # Errors
 ///
@@ -155,6 +162,9 @@ pub struct SdkTools {
 /// # fn main() -> anyhow::Result<()> {
 /// let tools = locate_sdk_tools()?;
 /// println!("MakeAppx: {}", tools.makeappx.display());
+/// if let Some(makepri) = &tools.makepri {
+///     println!("MakePri: {}", makepri.display());
+/// }
 /// if let Some(signtool) = &tools.signtool {
 ///     println!("SignTool: {}", signtool.display());
 /// }
@@ -202,6 +212,14 @@ pub fn locate_sdk_tools() -> Result<SdkTools> {
             None
         }
     };
+    let makepri = {
+        let p = base.join("x64").join("makepri.exe");
+        if p.exists() {
+            Some(p)
+        } else {
+            None
+        }
+    };
     // WACK (Windows App Certification Kit) is in a separate directory
     let appcert = {
         let kits_root10: String = roots.get_value("KitsRoot10").context("read KitsRoot10")?;
@@ -216,6 +234,7 @@ pub fn locate_sdk_tools() -> Result<SdkTools> {
     };
     Ok(SdkTools {
         makeappx,
+        makepri,
         signtool,
         appcert,
     })
@@ -312,6 +331,129 @@ fn sanitize(s: &str) -> String {
     } else {
         out
     }
+}
+
+/// Options for compiling `resources.pri` with MakePri.exe.
+pub struct PriOptions<'a> {
+    /// Path to AppxContent directory containing `AppxManifest.xml`.
+    pub appx_content_dir: &'a Path,
+    /// Default language qualifier used when generating `priconfig.xml`.
+    pub default_language: &'a str,
+    /// Target OS version passed to MakePri `/pv`.
+    pub target_os_version: &'a str,
+    /// Keep generated `priconfig.xml` after PRI compilation.
+    pub keep_priconfig: bool,
+    /// If `true`, overwrite existing `priconfig.xml`/`resources.pri`.
+    pub overwrite: bool,
+    /// Override path to makepri.exe.
+    pub makepri_override: Option<&'a Path>,
+}
+
+/// Compiles package resources into `resources.pri` with MakePri.exe.
+///
+/// This runs two MakePri commands:
+/// 1. `createconfig` to generate `priconfig.xml`
+/// 2. `new` to produce `resources.pri`
+///
+/// `resources.pri` is written into `appx_content_dir` and should be included
+/// in the final package so Windows can resolve qualified resources correctly.
+pub fn compile_resources_pri(tools: &SdkTools, opts: &PriOptions<'_>) -> Result<PathBuf> {
+    let makepri = opts
+        .makepri_override
+        .or(tools.makepri.as_deref())
+        .ok_or(MsixError::ToolMissing("makepri.exe"))?;
+
+    let manifest = opts.appx_content_dir.join("AppxManifest.xml");
+    if !manifest.exists() {
+        return Err(MsixError::Manifest(format!("missing {}", manifest.display())).into());
+    }
+
+    let priconfig = opts.appx_content_dir.join("priconfig.xml");
+    let resources_pri = opts.appx_content_dir.join("resources.pri");
+
+    let createconfig_args = build_makepri_createconfig_args(
+        &priconfig,
+        opts.default_language,
+        opts.target_os_version,
+        opts.overwrite,
+    );
+    let createconfig_status = Command::new(makepri)
+        .args(createconfig_args)
+        .status()
+        .context("run makepri createconfig")?;
+    if !createconfig_status.success() {
+        return Err(MsixError::MakePri(format!(
+            "createconfig {}",
+            opts.appx_content_dir.display()
+        ))
+        .into());
+    }
+
+    let new_args = build_makepri_new_args(
+        opts.appx_content_dir,
+        &priconfig,
+        &manifest,
+        &resources_pri,
+        opts.overwrite,
+    );
+    let new_status = Command::new(makepri)
+        .args(new_args)
+        .status()
+        .context("run makepri new")?;
+    if !new_status.success() {
+        return Err(MsixError::MakePri(format!("new {}", opts.appx_content_dir.display())).into());
+    }
+
+    if !opts.keep_priconfig {
+        let _ = fs::remove_file(&priconfig);
+    }
+
+    Ok(resources_pri)
+}
+
+fn build_makepri_createconfig_args(
+    priconfig: &Path,
+    default_language: &str,
+    target_os_version: &str,
+    overwrite: bool,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        "createconfig".into(),
+        "/cf".into(),
+        priconfig.as_os_str().into(),
+        "/dq".into(),
+        format!("lang-{default_language}").into(),
+        "/pv".into(),
+        target_os_version.into(),
+    ];
+    if overwrite {
+        args.push("/o".into());
+    }
+    args
+}
+
+fn build_makepri_new_args(
+    appx_content_dir: &Path,
+    priconfig: &Path,
+    manifest: &Path,
+    resources_pri: &Path,
+    overwrite: bool,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = vec![
+        "new".into(),
+        "/pr".into(),
+        appx_content_dir.as_os_str().into(),
+        "/cf".into(),
+        priconfig.as_os_str().into(),
+        "/mn".into(),
+        manifest.as_os_str().into(),
+        "/of".into(),
+        resources_pri.as_os_str().into(),
+    ];
+    if overwrite {
+        args.push("/o".into());
+    }
+    args
 }
 
 /// Creates a .msix package for a specific architecture.
@@ -732,8 +874,25 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
         .as_ref()
         .ok_or(MsixError::ToolMissing("appcert.exe (WACK)"))?;
 
+    // Reset previous WACK session state before running a new validation.
+    // Some environments require an explicit reset to avoid test-session conflicts.
+    let reset_status = Command::new(appcert)
+        .arg("reset")
+        .status()
+        .context("run appcert reset")?;
+    if !reset_status.success() {
+        return Err(MsixError::Validation("appcert reset failed".into()).into());
+    }
+
     // Use unique report file to avoid conflicts with previous runs
-    let report_file = std::env::temp_dir().join(format!("wack_report_{}.xml", std::process::id()));
+    let report_file = std::env::temp_dir().join(format!(
+        "wack_report_{}_{}.xml",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ));
     // Remove existing report file if present
     let _ = fs::remove_file(&report_file);
 
@@ -749,7 +908,11 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
         .context("run appcert (WACK)")?;
 
     if !status.success() {
-        return Err(MsixError::Validation(msix_or_bundle.display().to_string()).into());
+        let mut message = msix_or_bundle.display().to_string();
+        if report_file.exists() {
+            message.push_str(&format!(" (report: {})", report_file.display()));
+        }
+        return Err(MsixError::Validation(message).into());
     }
     Ok(())
 }
@@ -836,6 +999,54 @@ mod tests {
         args.into_iter()
             .map(|s| s.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[test]
+    fn build_makepri_createconfig_args_with_overwrite() {
+        let args = args_to_strings(build_makepri_createconfig_args(
+            Path::new("priconfig.xml"),
+            "en-us",
+            "10.0.0",
+            true,
+        ));
+        assert_eq!(
+            args,
+            vec![
+                "createconfig",
+                "/cf",
+                "priconfig.xml",
+                "/dq",
+                "lang-en-us",
+                "/pv",
+                "10.0.0",
+                "/o"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_makepri_new_args_without_overwrite() {
+        let args = args_to_strings(build_makepri_new_args(
+            Path::new("AppxContent"),
+            Path::new("AppxContent/priconfig.xml"),
+            Path::new("AppxContent/AppxManifest.xml"),
+            Path::new("AppxContent/resources.pri"),
+            false,
+        ));
+        assert_eq!(
+            args,
+            vec![
+                "new",
+                "/pr",
+                "AppxContent",
+                "/cf",
+                "AppxContent/priconfig.xml",
+                "/mn",
+                "AppxContent/AppxManifest.xml",
+                "/of",
+                "AppxContent/resources.pri"
+            ]
+        );
     }
 
     #[test]
