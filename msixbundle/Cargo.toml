@@ -19,7 +19,7 @@ sdk-discovery = ["dep:winreg"]
 anyhow = "1"
 thiserror = "2"
 roxmltree = "0.21"
-winreg = { version = "0.55", optional = true }
+winreg = { version = "0.56", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
