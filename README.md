@@ -6,14 +6,13 @@ A Rust library and CLI tool for building and signing Windows MSIX packages and M
 
 `msixbundle-rs` provides a programmatic Rust interface to automate the creation, signing, and validation of multi-architecture MSIX packages and bundles. It's designed for build pipelines that need to package Windows applications for distribution via the Microsoft Store or enterprise deployment.
 
-## Crates
+## Packages
 
-| Crate | Description | crates.io |
-|-------|-------------|-----------|
+| Package | Description | Registry |
+|---------|-------------|----------|
 | [msixbundle](./msixbundle) | Core library for MSIX packaging operations | [![crates.io](https://img.shields.io/crates/v/msixbundle.svg)](https://crates.io/crates/msixbundle) |
 | [msixbundle-cli](./msixbundle-cli) | Command-line tool for packaging workflows | [![crates.io](https://img.shields.io/crates/v/msixbundle-cli.svg)](https://crates.io/crates/msixbundle-cli) |
-
-Prebuilt Windows binaries of `msixbundle-cli` (x64 + arm64) are also published to npm as [`@choochmeque/msixbundle-cli-win32`](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32) [![npm](https://img.shields.io/npm/v/@choochmeque/msixbundle-cli-win32.svg)](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32). It's intended as an `optionalDependencies` sidecar for tools like [`@choochmeque/tauri-windows-bundle`](https://www.npmjs.com/package/@choochmeque/tauri-windows-bundle), not for direct use.
+| [@choochmeque/msixbundle-cli-win32](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32) | Prebuilt Windows binaries (x64 + arm64) as an npm sidecar for [`@choochmeque/tauri-windows-bundle`](https://www.npmjs.com/package/@choochmeque/tauri-windows-bundle) | [![npm](https://img.shields.io/npm/v/@choochmeque/msixbundle-cli-win32.svg)](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32) |
 
 ## Features
 
@@ -33,7 +32,7 @@ Prebuilt Windows binaries of `msixbundle-cli` (x64 + arm64) are also published t
   - Install via [Visual Studio](https://visualstudio.microsoft.com/) or [standalone SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/)
 - **Windows App Certification Kit (WACK)**: Required for validation (appcert.exe)
   - Installed automatically with the Windows SDK
-- **Rust**: 1.70+ (2021 edition)
+- **Rust**: 1.85+ (2024 edition)
 
 ## Quick Start
 
