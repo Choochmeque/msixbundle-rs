@@ -13,7 +13,7 @@ A Rust library and CLI tool for building and signing Windows MSIX packages and M
 | [msixbundle](./msixbundle) | Core library for MSIX packaging operations | [![crates.io](https://img.shields.io/crates/v/msixbundle.svg)](https://crates.io/crates/msixbundle) |
 | [msixbundle-cli](./msixbundle-cli) | Command-line tool for packaging workflows | [![crates.io](https://img.shields.io/crates/v/msixbundle-cli.svg)](https://crates.io/crates/msixbundle-cli) |
 
-Prebuilt Windows binaries of `msixbundle-cli` (x64 + arm64) are also published to npm as [`@choochmeque/msixbundle-cli-win32`](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32). It's intended as an `optionalDependencies` sidecar for tools like [`@choochmeque/tauri-windows-bundle`](https://www.npmjs.com/package/@choochmeque/tauri-windows-bundle), not for direct use.
+Prebuilt Windows binaries of `msixbundle-cli` (x64 + arm64) are also published to npm as [`@choochmeque/msixbundle-cli-win32`](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32) [![npm](https://img.shields.io/npm/v/@choochmeque/msixbundle-cli-win32.svg)](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32). It's intended as an `optionalDependencies` sidecar for tools like [`@choochmeque/tauri-windows-bundle`](https://www.npmjs.com/package/@choochmeque/tauri-windows-bundle), not for direct use.
 
 ## Features
 
