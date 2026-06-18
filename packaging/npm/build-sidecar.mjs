@@ -47,6 +47,7 @@ const pkg = {
   },
   homepage: 'https://github.com/Choochmeque/msixbundle-rs',
   files: ['bin/', 'README.md'],
+  publishConfig: { access: 'public' },
 };
 
 writeFileSync(join(outDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
