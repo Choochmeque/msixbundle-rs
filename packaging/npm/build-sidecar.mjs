@@ -43,7 +43,7 @@ const pkg = {
   license: 'MIT',
   repository: {
     type: 'git',
-    url: 'https://github.com/Choochmeque/msixbundle-rs',
+    url: 'git+https://github.com/Choochmeque/msixbundle-rs.git',
   },
   homepage: 'https://github.com/Choochmeque/msixbundle-rs',
   files: ['bin/', 'README.md'],

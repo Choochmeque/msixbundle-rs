@@ -48,9 +48,12 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Ensure npm CLI supports trusted publishing
+        run: npm install -g npm@latest
+
       - name: Build npm sidecar package
         run: node packaging/npm/build-sidecar.mjs
 
       - name: Publish npm sidecar
-        run: npm publish
+        run: npm publish --provenance
         working-directory: packaging/npm/dist
