@@ -55,5 +55,7 @@ jobs:
         run: node packaging/npm/build-sidecar.mjs
 
       - name: Publish npm sidecar
-        run: npm publish --provenance
+        run: |
+          npm config set provenance true
+          npm publish --access public
         working-directory: packaging/npm/dist
