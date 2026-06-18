@@ -1,4 +1,4 @@
-name: Publish to crates.io
+name: Publish
 
 on:
   push:
@@ -17,6 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc, aarch64-pc-windows-msvc
 
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
@@ -35,3 +37,20 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth_cli.outputs.token }}
 
+      - name: Build msixbundle-cli for x86_64-pc-windows-msvc
+        run: cargo build --release -p msixbundle-cli --target x86_64-pc-windows-msvc
+
+      - name: Build msixbundle-cli for aarch64-pc-windows-msvc
+        run: cargo build --release -p msixbundle-cli --target aarch64-pc-windows-msvc
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Build npm sidecar package
+        run: node packaging/npm/build-sidecar.mjs
+
+      - name: Publish npm sidecar
+        run: npm publish --access public --provenance
+        working-directory: packaging/npm/dist
