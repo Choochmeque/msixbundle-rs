@@ -64,3 +64,5 @@ jobs:
           npm config set provenance true
           pnpm publish --access public --no-git-checks --tag latest
         working-directory: packaging/npm/dist
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
