@@ -1,9 +1,8 @@
 [workspace]
 members = [
+    "msix",
     "msixbundle",
     "msixbundle-cli",
-    "msix-sys",
-    "msix",
 ]
 resolver = "2"
 
