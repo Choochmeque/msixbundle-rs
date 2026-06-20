@@ -6,18 +6,20 @@ A Rust library and CLI tool for building and signing Windows MSIX packages and M
 
 `msixbundle-rs` provides a programmatic Rust interface to automate the creation, signing, and validation of multi-architecture MSIX packages and bundles. It's designed for build pipelines that need to package Windows applications for distribution via the Microsoft Store or enterprise deployment.
 
-## Crates
+## Packages
 
-| Crate | Description | crates.io |
-|-------|-------------|-----------|
+| Package | Description | Registry |
+|---------|-------------|----------|
 | [msixbundle](./msixbundle) | Core library for MSIX packaging operations | [![crates.io](https://img.shields.io/crates/v/msixbundle.svg)](https://crates.io/crates/msixbundle) |
 | [msixbundle-cli](./msixbundle-cli) | Command-line tool for packaging workflows | [![crates.io](https://img.shields.io/crates/v/msixbundle-cli.svg)](https://crates.io/crates/msixbundle-cli) |
+| [@choochmeque/msixbundle-cli-win32](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32) | Prebuilt Windows binaries (x64 + arm64) as an npm sidecar for [`@choochmeque/tauri-windows-bundle`](https://www.npmjs.com/package/@choochmeque/tauri-windows-bundle) | [![npm](https://img.shields.io/npm/v/@choochmeque/msixbundle-cli-win32.svg)](https://www.npmjs.com/package/@choochmeque/msixbundle-cli-win32) |
 
 ## Features
 
 - **Multi-architecture support**: Build separate MSIX packages for x64 and ARM64 architectures
 - **Automatic bundle creation**: Combine per-architecture packages into a single `.msixbundle`
-- **SDK auto-discovery**: Automatically locate Windows SDK tools (`MakeAppx.exe`, `signtool.exe`, `appcert.exe`) via registry
+- **SDK auto-discovery**: Automatically locate Windows SDK tools (`MakeAppx.exe`, `makepri.exe`, `signtool.exe`, `appcert.exe`) via registry
+- **Resource indexing**: Optionally generate `resources.pri` with `makepri.exe` for qualified assets
 - **Code signing**: Sign packages and bundles with PFX certificates
 - **Timestamping**: Support for both RFC3161 and Authenticode timestamp protocols
 - **Validation**: Validate packages using Windows App Certification Kit (WACK) and verify signatures
@@ -26,11 +28,11 @@ A Rust library and CLI tool for building and signing Windows MSIX packages and M
 ## Requirements
 
 - **Windows OS**: This tool requires Windows and the Windows SDK
-- **Windows SDK 10**: MakeAppx.exe and signtool.exe must be installed
+- **Windows SDK 10**: MakeAppx.exe, MakePri.exe and signtool.exe must be installed
   - Install via [Visual Studio](https://visualstudio.microsoft.com/) or [standalone SDK](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/)
 - **Windows App Certification Kit (WACK)**: Required for validation (appcert.exe)
   - Installed automatically with the Windows SDK
-- **Rust**: 1.70+ (2021 edition)
+- **Rust**: 1.85+ (2024 edition)
 
 ## Quick Start
 
@@ -53,7 +55,7 @@ msixbundle-cli \
 
 ```toml
 [dependencies]
-msixbundle = "1.0"
+msixbundle = "1.1"
 ```
 
 ```rust
@@ -84,11 +86,12 @@ msixbundle-rs/
 ## How It Works
 
 1. **Manifest Parsing**: Reads `AppxManifest.xml` from each architecture directory to extract version and identity information
-2. **Package Creation**: Uses `MakeAppx.exe` to create `.msix` files for each architecture
-3. **Bundle Mapping**: Generates a `bundlemap.txt` file listing all architecture packages
-4. **Bundle Creation**: Uses `MakeAppx.exe` to combine packages into a `.msixbundle`
-5. **Signing**: Uses `signtool.exe` to apply digital signatures with optional timestamping
-6. **Validation**: Optionally validates packages with WACK and verifies signature validity
+2. **Resource Indexing (optional)**: Uses `makepri.exe` to generate `resources.pri`
+3. **Package Creation**: Uses `MakeAppx.exe` to create `.msix` files for each architecture
+4. **Bundle Mapping**: Generates a `bundlemap.txt` file listing all architecture packages
+5. **Bundle Creation**: Uses `MakeAppx.exe` to combine packages into a `.msixbundle`
+6. **Signing**: Uses `signtool.exe` to apply digital signatures with optional timestamping
+7. **Validation**: Optionally validates packages with WACK and verifies signature validity
 
 ## Contributing
 
@@ -103,5 +106,6 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 - [MSIX Documentation](https://docs.microsoft.com/en-us/windows/msix/)
 - [MakeAppx.exe Tool Reference](https://docs.microsoft.com/en-us/windows/msix/package/create-app-package-with-makeappx-tool)
 - [SignTool.exe Documentation](https://docs.microsoft.com/en-us/windows/win32/seccrypto/signtool)
+- [MakePri.exe Tool Reference](https://learn.microsoft.com/en-us/windows/uwp/app-resources/compile-resources-manually-with-makepri)
 - [Windows App Certification Kit (WACK)](https://docs.microsoft.com/en-us/windows/uwp/debug-test-perf/windows-app-certification-kit)
 - [AppxManifest Schema](https://docs.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/schema-root)

@@ -1,4 +1,4 @@
-name: Publish to crates.io
+name: Publish
 
 on:
   push:
@@ -17,16 +17,52 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc, aarch64-pc-windows-msvc
 
-      - name: Publish msixbundle
-        run: cargo publish -p msixbundle
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+        name: Publish msixbundle
+      - run: cargo publish -p msixbundle
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
       - name: Wait for crates.io index update
         run: Start-Sleep -Seconds 10
 
-      - name: Publish msixbundle-cli
-        run: cargo publish -p msixbundle-cli
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth_cli
+        name: Publish msixbundle-cli
+      - run: cargo publish -p msixbundle-cli
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth_cli.outputs.token }}
+
+      - name: Build msixbundle-cli for x86_64-pc-windows-msvc
+        run: cargo build --release -p msixbundle-cli --target x86_64-pc-windows-msvc
+
+      - name: Build msixbundle-cli for aarch64-pc-windows-msvc
+        run: cargo build --release -p msixbundle-cli --target aarch64-pc-windows-msvc
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      - name: Build npm sidecar package
+        run: node packaging/npm/build-sidecar.mjs
+
+      - name: Publish npm sidecar
+        run: |
+          npm config set provenance true
+          pnpm publish --access public --no-git-checks --tag latest
+        working-directory: packaging/npm/dist
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

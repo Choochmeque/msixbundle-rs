@@ -14,6 +14,7 @@ msixbundle = "1.0"
 - **SDK auto-discovery**: Automatically locate Windows SDK tools via registry
 - **Manifest parsing**: Extract version and display name from `AppxManifest.xml`
 - **Package creation**: Create `.msix` files for each architecture
+- **Resource indexing**: Generate `resources.pri` with MakePri.exe
 - **Bundle creation**: Combine multiple `.msix` files into a `.msixbundle`
 - **Code signing**: Sign packages and bundles with PFX certificates or certificate store thumbprints
 - **Timestamping**: Support for RFC3161 and Authenticode protocols
@@ -25,6 +26,7 @@ msixbundle = "1.0"
 |----------|-------------|
 | `locate_sdk_tools()` | Find Windows SDK tools on the system |
 | `read_manifest_info()` | Parse AppxManifest.xml for version and identity |
+| `compile_resources_pri()` | Generate `resources.pri` for qualified asset resolution |
 | `pack_arch()` | Create a per-architecture .msix package |
 | `build_bundle()` | Combine multiple .msix files into a .msixbundle |
 | `sign_artifact()` | Sign packages/bundles with a PFX or certificate thumbprint |
@@ -45,6 +47,16 @@ fn main() -> anyhow::Result<()> {
     let x64_dir = Path::new("./build/x64/AppxContent");
     let manifest = read_manifest_info(x64_dir)?;
     println!("Building {} v{}", manifest.display_name, manifest.version);
+
+    // Optional: generate resources.pri for scale-qualified assets
+    compile_resources_pri(&tools, &PriOptions {
+        appx_content_dir: x64_dir,
+        default_language: "en-us",
+        target_os_version: "10.0.0",
+        keep_priconfig: false,
+        overwrite: true,
+        makepri_override: None,
+    })?;
 
     // Pack architectures (last param: overwrite existing files)
     let out_dir = Path::new("./output");
@@ -127,7 +139,9 @@ The library uses `anyhow::Result` for error handling and provides custom error t
 ## Requirements
 
 - Windows OS with Windows SDK 10 installed
-- MakeAppx.exe, signtool.exe, and appcert.exe (for validation)
+- MakeAppx.exe and signtool.exe
+- makepri.exe (optional, required for `compile_resources_pri()`)
+- appcert.exe (optional, required for validation)
 
 ## License
 
