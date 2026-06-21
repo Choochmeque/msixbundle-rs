@@ -19,6 +19,14 @@ pub use package_writer::{pack, PackOptions};
 pub enum MsixError {
     #[error("source directory missing AppxManifest.xml: {0}")]
     ManifestMissing(std::path::PathBuf),
+    #[error("bundle requires at least one package")]
+    EmptyBundle,
+    #[error("invalid zip writer state: {0}")]
+    InvalidState(&'static str),
+    /// Hit a hard limit of the traditional 32-bit ZIP format. ZIP64 is not
+    /// yet implemented; once it is, these become non-errors.
+    #[error("zip32 limit exceeded: {what} (> {limit}); ZIP64 not yet implemented")]
+    Zip32Limit { what: &'static str, limit: u64 },
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("xml: {0}")]

@@ -19,23 +19,23 @@ const MANIFEST_XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 
 #[test]
 fn pack_minimal_dir() {
-    let src = tempfile::tempdir().unwrap();
-    let out = tempfile::NamedTempFile::new().unwrap();
+    let src = tempfile::tempdir().expect("create temp source dir");
+    let out = tempfile::NamedTempFile::new().expect("create temp output file");
 
     // source layout:
     //   AppxManifest.xml
     //   hello.txt
     //   Assets/Logo.png   (tiny stub)
-    fs::write(src.path().join("AppxManifest.xml"), MANIFEST_XML).unwrap();
-    fs::write(src.path().join("hello.txt"), b"hello msix\n").unwrap();
-    fs::create_dir(src.path().join("Assets")).unwrap();
-    fs::write(src.path().join("Assets/Logo.png"), b"\x89PNG\r\n\x1a\n").unwrap();
+    fs::write(src.path().join("AppxManifest.xml"), MANIFEST_XML).expect("write manifest");
+    fs::write(src.path().join("hello.txt"), b"hello msix\n").expect("write hello.txt");
+    fs::create_dir(src.path().join("Assets")).expect("mkdir Assets");
+    fs::write(src.path().join("Assets/Logo.png"), b"\x89PNG\r\n\x1a\n").expect("write Logo.png");
 
-    pack(src.path(), out.path(), &PackOptions::default()).unwrap();
+    pack(src.path(), out.path(), &PackOptions::default()).expect("pack succeeds");
 
     // Re-open as a zip and check structure.
-    let f = fs::File::open(out.path()).unwrap();
-    let mut zip = zip::ZipArchive::new(f).unwrap();
+    let f = fs::File::open(out.path()).expect("open output");
+    let mut zip = zip::ZipArchive::new(f).expect("parse output as zip");
     let names: Vec<String> = zip.file_names().map(String::from).collect();
 
     assert!(names.contains(&"AppxManifest.xml".to_string()), "names = {names:?}");
@@ -46,12 +46,18 @@ fn pack_minimal_dir() {
 
     // Manifest content roundtrips byte-for-byte.
     let mut s = String::new();
-    zip.by_name("AppxManifest.xml").unwrap().read_to_string(&mut s).unwrap();
+    zip.by_name("AppxManifest.xml")
+        .expect("AppxManifest.xml entry")
+        .read_to_string(&mut s)
+        .expect("read manifest as utf-8");
     assert_eq!(s, MANIFEST_XML);
 
     // BlockMap mentions our payload with backslash separator.
     let mut bm = String::new();
-    zip.by_name("AppxBlockMap.xml").unwrap().read_to_string(&mut bm).unwrap();
+    zip.by_name("AppxBlockMap.xml")
+        .expect("AppxBlockMap.xml entry")
+        .read_to_string(&mut bm)
+        .expect("read blockmap as utf-8");
     assert!(bm.contains(r#"Name="Assets\Logo.png""#), "blockmap = {bm}");
     assert!(bm.contains(r#"Name="hello.txt""#), "blockmap = {bm}");
     assert!(bm.contains("HashMethod=\"http://www.w3.org/2001/04/xmlenc#sha256\""));
@@ -70,7 +76,10 @@ fn pack_minimal_dir() {
 
     // Content types has Default for txt and png, Override for the blockmap + manifest.
     let mut ct = String::new();
-    zip.by_name("[Content_Types].xml").unwrap().read_to_string(&mut ct).unwrap();
+    zip.by_name("[Content_Types].xml")
+        .expect("[Content_Types].xml entry")
+        .read_to_string(&mut ct)
+        .expect("read content types as utf-8");
     assert!(ct.contains(r#"Extension="txt""#), "ct = {ct}");
     assert!(ct.contains(r#"Extension="png""#), "ct = {ct}");
     assert!(ct.contains(r#"PartName="/AppxBlockMap.xml""#), "ct = {ct}");
@@ -83,14 +92,14 @@ fn pack_minimal_dir() {
 fn blocks_inside<'a>(bm: &'a str, name: &str) -> Vec<&'a str> {
     let needle = format!(r#"Name="{name}""#);
     let name_at = bm.find(&needle).expect("name not found in blockmap");
-    let body_start = bm[name_at..].find('>').expect("malformed File open") + name_at + 1;
-    let body_end = bm[body_start..].find("</File>").expect("no </File>") + body_start;
+    let body_start = bm[name_at..].find('>').expect("malformed <File> tag") + name_at + 1;
+    let body_end = bm[body_start..].find("</File>").expect("missing </File>") + body_start;
     let body = &bm[body_start..body_end];
     let mut out = Vec::new();
     let mut rest = body;
     while let Some(start) = rest.find("<Block") {
         let after = &rest[start..];
-        let end = after.find("/>").expect("self-closing Block expected") + 2;
+        let end = after.find("/>").expect("expected self-closing <Block ... />") + 2;
         out.push(&after[..end]);
         rest = &after[end..];
     }

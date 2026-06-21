@@ -79,7 +79,9 @@ pub struct ContainedPackage {
 }
 
 pub fn bundle(packages: &[ContainedPackage], output: &Path, identity: &BundleIdentity) -> Result<()> {
-    assert!(!packages.is_empty(), "bundle requires at least one package");
+    if packages.is_empty() {
+        return Err(crate::MsixError::EmptyBundle);
+    }
 
     let out = BufWriter::new(File::create(output)?);
     let mut zip = ZipWriter::new(out);

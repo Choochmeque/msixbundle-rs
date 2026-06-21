@@ -19,9 +19,11 @@ use std::io::{Seek, SeekFrom, Write};
 use crc32fast::Hasher;
 use flate2::{Compress, Compression, FlushCompress, Status};
 
-const LFH_SIG: u32 = 0x04034b50;
-const CDH_SIG: u32 = 0x02014b50;
-const EOCD_SIG: u32 = 0x06054b50;
+use crate::{MsixError, Result};
+
+const LFH_SIG: u32 = 0x0403_4b50;
+const CDH_SIG: u32 = 0x0201_4b50;
+const EOCD_SIG: u32 = 0x0605_4b50;
 
 const VERSION_NEEDED: u16 = 20;
 const VERSION_MADE_BY: u16 = (3 << 8) | 63; // Unix host, ZIP 6.3 features.
@@ -67,13 +69,24 @@ impl<W: Write + Seek> ZipWriter<W> {
 
     /// Begin a new entry. Returns the LFH size (bytes), needed by
     /// `AppxBlockMap.xml`'s `LfhSize` attribute.
-    pub fn start_file(&mut self, name: &str, compress: bool) -> std::io::Result<u32> {
-        assert!(self.cur.is_none(), "previous file not closed");
+    pub fn start_file(&mut self, name: &str, compress: bool) -> Result<u32> {
+        if self.cur.is_some() {
+            return Err(MsixError::InvalidState(
+                "start_file called while a previous file is still open",
+            ));
+        }
+        if name.len() > u16::MAX as usize {
+            return Err(MsixError::Zip32Limit {
+                what: "file name length (bytes)",
+                limit: u16::MAX as u64,
+            });
+        }
         let lfh_offset = self.inner.stream_position()?;
         let method = if compress { METHOD_DEFLATE } else { METHOD_STORED };
 
         write_lfh(&mut self.inner, name, method, 0, 0, 0)?;
-        let lfh_size = lfh_total_size(name);
+        // name.len() ≤ u16::MAX < u32::MAX, so 30 + len always fits in u32.
+        let lfh_size = 30 + name.len() as u32;
 
         self.cur = Some(CurrentFile {
             name: name.to_string(),
@@ -89,8 +102,10 @@ impl<W: Write + Seek> ZipWriter<W> {
 
     /// Write one block of raw payload. Returns bytes appended to the archive
     /// for this block (after compression, if applicable).
-    pub fn write_block(&mut self, raw: &[u8]) -> std::io::Result<u32> {
-        let cur = self.cur.as_mut().expect("no open file");
+    pub fn write_block(&mut self, raw: &[u8]) -> Result<u32> {
+        let cur = self.cur.as_mut().ok_or(MsixError::InvalidState(
+            "write_block called with no open file",
+        ))?;
         cur.crc.update(raw);
         cur.uncompressed_size += raw.len() as u64;
 
@@ -107,8 +122,11 @@ impl<W: Write + Seek> ZipWriter<W> {
 
     /// Close the current entry: finish deflate, patch the LFH with real
     /// sizes/CRC, and record the entry for the central directory.
-    pub fn end_file(&mut self) -> std::io::Result<()> {
-        let mut cur = self.cur.take().expect("no open file");
+    pub fn end_file(&mut self) -> Result<()> {
+        let mut cur = self
+            .cur
+            .take()
+            .ok_or(MsixError::InvalidState("end_file called with no open file"))?;
 
         if let Some(c) = cur.deflate.as_mut() {
             let extra = deflate_block(c, &[], &mut self.inner, FlushCompress::Finish)?;
@@ -116,9 +134,9 @@ impl<W: Write + Seek> ZipWriter<W> {
         }
 
         let crc = cur.crc.clone().finalize();
-        let comp = u32_from(cur.compressed_size, "compressed size > 4 GiB");
-        let uncomp = u32_from(cur.uncompressed_size, "uncompressed size > 4 GiB");
-        let lfh_off = u32_from(cur.lfh_offset, "archive > 4 GiB");
+        let comp = u32_zip_limit(cur.compressed_size, "compressed entry size")?;
+        let uncomp = u32_zip_limit(cur.uncompressed_size, "uncompressed entry size")?;
+        let lfh_off = u32_zip_limit(cur.lfh_offset, "archive offset")?;
 
         // Patch the LFH (preserving its size — only CRC / sizes change).
         let after = self.inner.stream_position()?;
@@ -140,23 +158,29 @@ impl<W: Write + Seek> ZipWriter<W> {
     /// Current byte position in the underlying stream. Call immediately
     /// after `start_file()` to learn the offset where the entry's file
     /// data begins — needed for `AppxBundleManifest.xml`'s `Offset=` attr.
-    pub fn position(&mut self) -> std::io::Result<u64> {
-        self.inner.stream_position()
+    pub fn position(&mut self) -> Result<u64> {
+        Ok(self.inner.stream_position()?)
     }
 
     /// Write central directory + EOCD and return the wrapped writer.
-    pub fn finish(mut self) -> std::io::Result<W> {
-        assert!(self.cur.is_none(), "open file at finish()");
+    pub fn finish(mut self) -> Result<W> {
+        if self.cur.is_some() {
+            return Err(MsixError::InvalidState(
+                "finish called with a file still open",
+            ));
+        }
 
         let cd_offset = self.inner.stream_position()?;
         for e in &self.entries {
             write_cdh(&mut self.inner, e)?;
         }
         let cd_end = self.inner.stream_position()?;
-        let cd_size = u32_from(cd_end - cd_offset, "central dir > 4 GiB");
-        let cd_offset_u32 = u32_from(cd_offset, "archive > 4 GiB");
-        let entry_count = u16::try_from(self.entries.len())
-            .expect("more than 65535 entries; needs ZIP64");
+        let cd_size = u32_zip_limit(cd_end - cd_offset, "central directory size")?;
+        let cd_offset_u32 = u32_zip_limit(cd_offset, "central directory offset")?;
+        let entry_count = u16::try_from(self.entries.len()).map_err(|_| MsixError::Zip32Limit {
+            what: "entry count",
+            limit: u16::MAX as u64,
+        })?;
 
         write_eocd(&mut self.inner, entry_count, cd_size, cd_offset_u32)?;
         Ok(self.inner)
@@ -168,7 +192,7 @@ fn deflate_block<W: Write>(
     input: &[u8],
     out: &mut W,
     flush: FlushCompress,
-) -> std::io::Result<u32> {
+) -> Result<u32> {
     let mut buf = [0u8; 64 * 1024];
     let mut written = 0u32;
     let mut in_pos = 0usize;
@@ -183,9 +207,10 @@ fn deflate_block<W: Write>(
 
         if produced > 0 {
             out.write_all(&buf[..produced])?;
-            written = written
-                .checked_add(produced as u32)
-                .expect("compressed block > 4 GiB");
+            written = written.checked_add(produced as u32).ok_or(MsixError::Zip32Limit {
+                what: "compressed block size",
+                limit: u32::MAX as u64,
+            })?;
         }
         in_pos += consumed;
 
@@ -207,6 +232,10 @@ fn deflate_block<W: Write>(
     Ok(written)
 }
 
+/// `name` length is pre-validated by `start_file` to fit in `u16`, and entries
+/// in `Entry` came from `start_file` as well — so `name_len_u16` succeeds for
+/// every internal caller. Returns an error rather than panicking on the
+/// theoretical violation.
 fn write_lfh<W: Write>(
     w: &mut W,
     name: &str,
@@ -214,7 +243,8 @@ fn write_lfh<W: Write>(
     crc32: u32,
     compressed_size: u32,
     uncompressed_size: u32,
-) -> std::io::Result<()> {
+) -> Result<()> {
+    let name_len = name_len_u16(name)?;
     w.write_all(&LFH_SIG.to_le_bytes())?;
     w.write_all(&VERSION_NEEDED.to_le_bytes())?;
     w.write_all(&GP_FLAG_UTF8.to_le_bytes())?;
@@ -224,14 +254,14 @@ fn write_lfh<W: Write>(
     w.write_all(&crc32.to_le_bytes())?;
     w.write_all(&compressed_size.to_le_bytes())?;
     w.write_all(&uncompressed_size.to_le_bytes())?;
-    let name_len = u16::try_from(name.len()).expect("file name > 65535 bytes");
     w.write_all(&name_len.to_le_bytes())?;
     w.write_all(&0u16.to_le_bytes())?; // extra field length
     w.write_all(name.as_bytes())?;
     Ok(())
 }
 
-fn write_cdh<W: Write>(w: &mut W, e: &Entry) -> std::io::Result<()> {
+fn write_cdh<W: Write>(w: &mut W, e: &Entry) -> Result<()> {
+    let name_len = name_len_u16(&e.name)?;
     w.write_all(&CDH_SIG.to_le_bytes())?;
     w.write_all(&VERSION_MADE_BY.to_le_bytes())?;
     w.write_all(&VERSION_NEEDED.to_le_bytes())?;
@@ -242,7 +272,6 @@ fn write_cdh<W: Write>(w: &mut W, e: &Entry) -> std::io::Result<()> {
     w.write_all(&e.crc32.to_le_bytes())?;
     w.write_all(&e.compressed_size.to_le_bytes())?;
     w.write_all(&e.uncompressed_size.to_le_bytes())?;
-    let name_len = u16::try_from(e.name.len()).expect("file name > 65535 bytes");
     w.write_all(&name_len.to_le_bytes())?;
     w.write_all(&0u16.to_le_bytes())?; // extra
     w.write_all(&0u16.to_le_bytes())?; // comment
@@ -254,12 +283,19 @@ fn write_cdh<W: Write>(w: &mut W, e: &Entry) -> std::io::Result<()> {
     Ok(())
 }
 
+fn name_len_u16(name: &str) -> Result<u16> {
+    u16::try_from(name.len()).map_err(|_| MsixError::Zip32Limit {
+        what: "file name length (bytes)",
+        limit: u16::MAX as u64,
+    })
+}
+
 fn write_eocd<W: Write>(
     w: &mut W,
     entry_count: u16,
     cd_size: u32,
     cd_offset: u32,
-) -> std::io::Result<()> {
+) -> Result<()> {
     w.write_all(&EOCD_SIG.to_le_bytes())?;
     w.write_all(&0u16.to_le_bytes())?; // disk number
     w.write_all(&0u16.to_le_bytes())?; // disk with CD
@@ -271,11 +307,6 @@ fn write_eocd<W: Write>(
     Ok(())
 }
 
-/// 30-byte fixed LFH header plus UTF-8 file-name length. No extra field.
-pub fn lfh_total_size(name: &str) -> u32 {
-    30 + u32::try_from(name.len()).expect("file name > 4 GiB")
-}
-
 /// Constant epoch (1980-01-01 00:00:00 — the earliest MS-DOS time) for
 /// deterministic output. MSIX tooling doesn't care about timestamps.
 fn dos_date() -> u16 {
@@ -285,6 +316,9 @@ fn dos_time() -> u16 {
     0
 }
 
-fn u32_from(v: u64, msg: &'static str) -> u32 {
-    u32::try_from(v).unwrap_or_else(|_| panic!("{msg}"))
+fn u32_zip_limit(v: u64, what: &'static str) -> Result<u32> {
+    u32::try_from(v).map_err(|_| MsixError::Zip32Limit {
+        what,
+        limit: u32::MAX as u64,
+    })
 }
