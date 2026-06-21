@@ -47,18 +47,74 @@ jobs:
           Copy-Item -Recurse test-content-x64 test-content-arm64
           (Get-Content test-content-arm64/AppxManifest.xml) -replace 'x64', 'arm64' | Set-Content test-content-arm64/AppxManifest.xml
 
-      - name: Test CLI pack x64
+      - name: Locate Windows SDK tools
+        id: sdk
+        shell: pwsh
+        run: |
+          $bin = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory `
+            | Where-Object { Test-Path "$($_.FullName)\x64\MakeAppx.exe" } `
+            | Sort-Object Name -Descending `
+            | Select-Object -First 1
+          if (-not $bin) { Write-Error "Windows SDK not found"; exit 1 }
+          $base = "$($bin.FullName)\x64"
+          echo "MAKEAPPX=$base\MakeAppx.exe" >> $env:GITHUB_OUTPUT
+          echo "SIGNTOOL=$base\signtool.exe" >> $env:GITHUB_OUTPUT
+          Write-Host "Using SDK at $base"
+
+      # --- Test 1: pack one arch + bundle (native) -> MakeAppx unbundle/unpack roundtrip ---
+      - name: Native pack x64 + bundle
         shell: pwsh
         run: |
           msixbundle-cli --out-dir ./output --dir-x64 ./test-content-x64
           if (!(Test-Path ./output/*.msixbundle)) { exit 1 }
 
-      - name: Test CLI multi-arch bundle with --validate
+      - name: Roundtrip - MakeAppx unbundle the native bundle
+        shell: pwsh
+        run: |
+          $bundle = (Get-ChildItem ./output/*.msixbundle)[0].FullName
+          & '${{ steps.sdk.outputs.MAKEAPPX }}' unbundle /p $bundle /d ./roundtrip-1 /o
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (!(Test-Path ./roundtrip-1/*.msix)) { exit 1 }
+
+      - name: Roundtrip - MakeAppx unpack the contained .msix
+        shell: pwsh
+        run: |
+          $msix = (Get-ChildItem ./roundtrip-1/*.msix)[0].FullName
+          & '${{ steps.sdk.outputs.MAKEAPPX }}' unpack /p $msix /d ./roundtrip-1-unpack /o
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (!(Test-Path ./roundtrip-1-unpack/AppxManifest.xml)) { exit 1 }
+
+      # --- Test 2: multi-arch bundle (native) + appcert WACK validate ---
+      - name: Native multi-arch bundle with WACK --validate
         shell: pwsh
         run: |
           msixbundle-cli --out-dir ./output-multi --dir-x64 ./test-content-x64 --dir-arm64 ./test-content-arm64 --validate
           if (!(Test-Path ./output-multi/*.msixbundle)) { exit 1 }
 
+      - name: Roundtrip - MakeAppx unbundle the multi-arch bundle
+        shell: pwsh
+        run: |
+          $bundle = (Get-ChildItem ./output-multi/*.msixbundle)[0].FullName
+          & '${{ steps.sdk.outputs.MAKEAPPX }}' unbundle /p $bundle /d ./roundtrip-multi /o
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # Should contain both x64 and arm64 .msix files.
+          $msixes = Get-ChildItem ./roundtrip-multi/*.msix
+          if ($msixes.Count -lt 2) {
+            Write-Error "Expected at least 2 .msix in unbundled output, got $($msixes.Count)"
+            exit 1
+          }
+
+      - name: Roundtrip - MakeAppx unpack each contained .msix
+        shell: pwsh
+        run: |
+          foreach ($msix in Get-ChildItem ./roundtrip-multi/*.msix) {
+            $out = "./roundtrip-multi-unpack/$($msix.BaseName)"
+            & '${{ steps.sdk.outputs.MAKEAPPX }}' unpack /p $msix.FullName /d $out /o
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            if (!(Test-Path "$out/AppxManifest.xml")) { exit 1 }
+          }
+
+      # --- Test 3: native signing (PFX via msix::RsaSigner) verified by SignTool ---
       - name: Create test certificate
         id: cert
         shell: pwsh
@@ -74,13 +130,32 @@ jobs:
         run: |
           certutil -addstore root test.cer
 
-      - name: Test CLI with PFX signing and verification
+      - name: Native PFX signing (--pfx routes through msix::sign_package)
         shell: pwsh
         run: |
-          msixbundle-cli --out-dir ./output-signed --dir-x64 ./test-content-x64 --pfx ./test.pfx --pfx-password TestPass123 --timestamp-url "" --verify
+          msixbundle-cli --out-dir ./output-signed --dir-x64 ./test-content-x64 --pfx ./test.pfx --pfx-password TestPass123 --timestamp-url ""
           if (!(Test-Path ./output-signed/*.msixbundle)) { exit 1 }
 
-      - name: Test CLI with thumbprint signing and verification
+      - name: Verify native-signed bundle with SignTool
+        shell: pwsh
+        run: |
+          $bundle = (Get-ChildItem ./output-signed/*.msixbundle)[0].FullName
+          & '${{ steps.sdk.outputs.SIGNTOOL }}' verify /pa $bundle
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Roundtrip - MakeAppx unbundle the native-signed bundle
+        shell: pwsh
+        run: |
+          $bundle = (Get-ChildItem ./output-signed/*.msixbundle)[0].FullName
+          & '${{ steps.sdk.outputs.MAKEAPPX }}' unbundle /p $bundle /d ./roundtrip-signed /o
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (!(Test-Path ./roundtrip-signed/AppxSignature.p7x)) {
+            Write-Error "Signed bundle is missing AppxSignature.p7x after unbundle"
+            exit 1
+          }
+
+      # --- Test 4: thumbprint signing routes through SignTool (Windows-only) ---
+      - name: SDK SignTool signing (--thumbprint)
         shell: pwsh
         run: |
           msixbundle-cli --out-dir ./output-signed-thumb --dir-x64 ./test-content-x64 --thumbprint ${{ steps.cert.outputs.THUMBPRINT }} --timestamp-url "" --verify
