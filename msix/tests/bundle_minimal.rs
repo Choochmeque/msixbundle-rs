@@ -42,12 +42,14 @@ fn bundle_two_archs() {
             filename: "Test.App_1.0.0.0_x64.msix".to_string(),
             architecture: Architecture::X64,
             version: "1.0.0.0".to_string(),
+            resources: vec![],
         },
         ContainedPackage {
             path: arm64_msix.path().to_path_buf(),
             filename: "Test.App_1.0.0.0_arm64.msix".to_string(),
             architecture: Architecture::Arm64,
             version: "1.0.0.0".to_string(),
+            resources: vec![],
         },
     ];
     let identity = BundleIdentity {

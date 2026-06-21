@@ -999,6 +999,8 @@ impl MsixBackend for NativeBackend {
         let contained: Vec<msix::ContainedPackage> = built
             .iter()
             .map(|(arch, path)| {
+                let id = msix::read_identity(path)
+                    .map_err(|e| anyhow::anyhow!("read identity from {}: {e}", path.display()))?;
                 Ok(msix::ContainedPackage {
                     path: path.clone(),
                     filename: path
@@ -1006,7 +1008,8 @@ impl MsixBackend for NativeBackend {
                         .map(|f| f.to_string_lossy().into_owned())
                         .ok_or_else(|| anyhow::anyhow!("package path has no filename"))?,
                     architecture: arch_from_str(arch)?,
-                    version: first.version.clone(),
+                    version: id.version,
+                    resources: id.resources,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

@@ -14,7 +14,7 @@ mod package_writer;
 mod zip_writer;
 
 pub use bundle::{bundle, Architecture, BundleIdentity, ContainedPackage};
-pub use identity::{read_identity, PackageIdentity};
+pub use identity::{read_identity, PackageIdentity, Resource};
 pub use package_writer::{pack, PackOptions};
 
 #[derive(thiserror::Error, Debug)]

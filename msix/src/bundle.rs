@@ -29,6 +29,7 @@ use quick_xml::Writer;
 
 use crate::block_map::{BlockMapWriter, BLOCK_SIZE};
 use crate::content_types::{self, ContentTypeWriter};
+use crate::identity::Resource;
 use crate::zip_writer::ZipWriter;
 use crate::Result;
 
@@ -76,6 +77,10 @@ pub struct ContainedPackage {
     pub architecture: Architecture,
     /// Quad-dotted version of the *contained* package.
     pub version: String,
+    /// `<Resource ...>` qualifiers from the package's inner manifest. Forwarded
+    /// untouched into the bundle manifest's `<Package><Resources>`. Empty
+    /// vec emits an empty `<Resources/>` (still required by the bundle schema).
+    pub resources: Vec<Resource>,
 }
 
 pub fn bundle(packages: &[ContainedPackage], output: &Path, identity: &BundleIdentity) -> Result<()> {
@@ -105,6 +110,7 @@ pub fn bundle(packages: &[ContainedPackage], output: &Path, identity: &BundleIde
             version: pkg.version.clone(),
             offset: data_offset,
             size: bytes.len() as u64,
+            resources: pkg.resources.clone(),
         });
     }
 
@@ -150,6 +156,7 @@ struct PackageRecord {
     version: String,
     offset: u64,
     size: u64,
+    resources: Vec<Resource>,
 }
 
 fn build_bundle_manifest(identity: &BundleIdentity, records: &[PackageRecord]) -> Result<Vec<u8>> {
@@ -179,13 +186,25 @@ fn build_bundle_manifest(identity: &BundleIdentity, records: &[PackageRecord]) -
         p.push_attribute(("Offset", offset.as_str()));
         p.push_attribute(("Size", size.as_str()));
         xml.write_event(Event::Start(p))?;
-        // <Resources> is required by the bundle schema; WACK fails to parse
-        // packages without it. We emit a minimum (language = en-us) until we
-        // wire through per-package resource extraction.
+        // <Resources> is required by the bundle schema; forward whatever the
+        // contained package declared in its own manifest. Empty list still
+        // emits `<Resources></Resources>` (and an empty bundle <Resources/>
+        // is invalid — at least one <Resource> is expected, so we fall back
+        // to a neutral `Language="en-us"` if the package declared none).
         xml.write_event(Event::Start(BytesStart::new("Resources")))?;
-        let mut res = BytesStart::new("Resource");
-        res.push_attribute(("Language", "en-us"));
-        xml.write_event(Event::Empty(res))?;
+        if r.resources.is_empty() {
+            let mut res = BytesStart::new("Resource");
+            res.push_attribute(("Language", "en-us"));
+            xml.write_event(Event::Empty(res))?;
+        } else {
+            for res in &r.resources {
+                let mut el = BytesStart::new("Resource");
+                for (k, v) in &res.attributes {
+                    el.push_attribute((k.as_str(), v.as_str()));
+                }
+                xml.write_event(Event::Empty(el))?;
+            }
+        }
         xml.write_event(Event::End(BytesEnd::new("Resources")))?;
         xml.write_event(Event::End(BytesEnd::new("Package")))?;
     }
