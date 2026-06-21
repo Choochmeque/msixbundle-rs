@@ -20,6 +20,14 @@ sha2 = "0.10"
 base64 = "0.22"
 walkdir = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Signing: pure-Rust PKCS#7 / X.509 / RSA stack.
+rasn = "0.28"
+rasn-cms = "0.28"
+rasn-pkix = "0.28"
+rsa = { version = "0.9", features = ["sha2"] }
+pem = "3"
+signature = "2"
+p12-keystore = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

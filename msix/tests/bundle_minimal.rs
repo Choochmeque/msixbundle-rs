@@ -5,7 +5,7 @@
 
 use std::io::Read;
 
-use msix::{bundle, pack, Architecture, BundleIdentity, ContainedPackage, PackOptions};
+use msix::{Architecture, BundleIdentity, ContainedPackage, PackOptions, bundle, pack};
 
 const MANIFEST_X64: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
@@ -72,7 +72,10 @@ fn bundle_two_archs() {
         "AppxBlockMap.xml",
         "[Content_Types].xml",
     ] {
-        assert!(names.contains(&must_have.to_string()), "missing {must_have} in {names:?}");
+        assert!(
+            names.contains(&must_have.to_string()),
+            "missing {must_have} in {names:?}"
+        );
     }
 
     // Manifest mentions both architectures.
@@ -107,7 +110,10 @@ fn bundle_two_archs() {
         .read_to_string(&mut ct)
         .expect("read content types as utf-8");
     assert!(ct.contains(r#"Extension="msix""#), "ct = {ct}");
-    assert!(ct.contains("application/vnd.ms-appx.bundlemanifest+xml"), "ct = {ct}");
+    assert!(
+        ct.contains("application/vnd.ms-appx.bundlemanifest+xml"),
+        "ct = {ct}"
+    );
     assert!(ct.contains(r#"PartName="/AppxBlockMap.xml""#), "ct = {ct}");
 
     // Cross-check: parse Offset/Size from manifest and verify those bytes match
@@ -116,9 +122,17 @@ fn bundle_two_archs() {
     let size_x64 = parse_attr(&m, "FileName=\"Test.App_1.0.0.0_x64.msix\"", "Size");
     let expected_x64_bytes = std::fs::read(x64_msix.path()).expect("read original x64 msix");
     let actual_bundle_bytes = std::fs::read(bundle_out.path()).expect("read bundle output");
-    assert_eq!(size_x64 as usize, expected_x64_bytes.len(), "Size attr wrong");
+    assert_eq!(
+        size_x64 as usize,
+        expected_x64_bytes.len(),
+        "Size attr wrong"
+    );
     let slice = &actual_bundle_bytes[off_x64 as usize..off_x64 as usize + size_x64 as usize];
-    assert_eq!(slice, expected_x64_bytes.as_slice(), "Offset slice != original msix");
+    assert_eq!(
+        slice,
+        expected_x64_bytes.as_slice(),
+        "Offset slice != original msix"
+    );
 }
 
 /// Pulls a u64 attribute value from the `<Package FileName=... Attr="value" ...>` element
@@ -130,5 +144,7 @@ fn parse_attr(manifest: &str, tag: &str, attr: &str) -> u64 {
     let needle = format!("{attr}=\"");
     let v_start = row.find(&needle).expect("attr not found") + needle.len();
     let v_end = row[v_start..].find('"').expect("attr value end") + v_start;
-    row[v_start..v_end].parse().expect("manifest attribute should parse as u64")
+    row[v_start..v_end]
+        .parse()
+        .expect("manifest attribute should parse as u64")
 }

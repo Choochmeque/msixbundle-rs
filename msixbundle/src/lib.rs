@@ -972,7 +972,10 @@ impl MsixBackend for NativeBackend {
         info: &ManifestInfo,
         arch: &str,
     ) -> Result<PathBuf> {
-        let out = out_dir.join(format!("{}_{}_{}.msix", info.display_name, info.version, arch));
+        let out = out_dir.join(format!(
+            "{}_{}_{}.msix",
+            info.display_name, info.version, arch
+        ));
         msix::pack(appx_dir, &out, &msix::PackOptions::default())
             .map_err(|e| anyhow::anyhow!("native pack: {e}"))?;
         Ok(out)

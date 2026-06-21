@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use log::{info, warn};
 use std::path::PathBuf;
@@ -111,7 +111,9 @@ fn resolve_path(p: &std::path::Path) -> Result<PathBuf> {
 fn main() -> Result<()> {
     let a = Args::parse();
     if a.verbose {
-        unsafe { std::env::set_var("RUST_LOG", "info"); }
+        unsafe {
+            std::env::set_var("RUST_LOG", "info");
+        }
     }
     env_logger::init();
 
@@ -122,14 +124,19 @@ fn main() -> Result<()> {
     let out_dir = resolve_path(&a.out_dir)?;
 
     let cert_source = build_cert_source(&a);
-    let sdk_requested = a.makepri || a.validate || a.verify || cert_source.is_some() || a.sign_each;
-    if sdk_requested && !cfg!(target_os = "windows") {
+    // SDK-only operations. `--pfx` is no longer in this list — we handle it
+    // natively via msix::RsaSigner / sign_package. `--thumbprint` still needs
+    // the Windows cert store; `--validate` / `--verify` / `--makepri` need
+    // appcert / SignTool / MakePri.
+    let sdk_only_requested = a.makepri || a.validate || a.verify || a.thumbprint.is_some();
+    if sdk_only_requested && !cfg!(target_os = "windows") {
         bail!(
-            "--makepri / --validate / --verify / --pfx / --thumbprint / --sign-each \
-             require Windows (native signing/validation not yet implemented)"
+            "--makepri / --validate / --verify / --thumbprint require Windows \
+             (no native equivalent yet)"
         );
     }
 
+    let native_signer = build_native_signer(&a)?;
     let (backend, sdk_tools) = build_backend(&a)?;
 
     // Pack per-arch
@@ -171,27 +178,19 @@ fn main() -> Result<()> {
         }
     }
 
-    // Sign per-arch (optional, often skipped)
+    // Sign per-arch (optional, often skipped). Prefer the native signer when
+    // we have one (avoids SignTool); fall back to SDK SignTool if a cert was
+    // requested via --thumbprint (Windows store, native can't reach it).
     if a.sign_each {
-        if let (Some(tools), Some(cert)) = (sdk_tools.as_ref(), cert_source.as_ref()) {
-            for (_, msix) in &built {
-                sign_artifact(
-                    tools,
-                    &SignOptions {
-                        artifact: msix,
-                        certificate: cert.clone(),
-                        sip_dll: a.sip_dll.as_deref(),
-                        timestamp_url: None,
-                        rfc3161: true,
-                        signtool_override: a.signtool_path.as_deref(),
-                    },
-                )?;
-                if a.verify {
-                    verify_signature(tools, msix)?;
-                }
-            }
-        } else {
-            warn!("--sign-each set but no --pfx or --thumbprint; skipping per-arch signing");
+        for (_, msix) in &built {
+            sign_one(
+                msix,
+                native_signer.as_ref(),
+                cert_source.as_ref(),
+                sdk_tools.as_ref(),
+                &a,
+                /*timestamp=*/ false,
+            )?;
         }
     }
 
@@ -200,24 +199,14 @@ fn main() -> Result<()> {
     info!("bundle: {}", bundle.display());
 
     // Sign bundle
-    if let Some(ref cert) = cert_source {
-        let tools = sdk_tools.as_ref().expect("signing gated to windows above");
-        let ts = if a.timestamp_url.is_empty() { None } else { Some(a.timestamp_url.as_str()) };
-        sign_artifact(
-            tools,
-            &SignOptions {
-                artifact: &bundle,
-                certificate: cert.clone(),
-                sip_dll: a.sip_dll.as_deref(),
-                timestamp_url: ts,
-                rfc3161: a.timestamp_mode.eq_ignore_ascii_case("rfc3161"),
-                signtool_override: a.signtool_path.as_deref(),
-            },
-        )?;
-        if a.verify {
-            verify_signature(tools, &bundle)?;
-        }
-    }
+    sign_one(
+        &bundle,
+        native_signer.as_ref(),
+        cert_source.as_ref(),
+        sdk_tools.as_ref(),
+        &a,
+        /*timestamp=*/ true,
+    )?;
 
     if a.validate {
         let tools = sdk_tools.as_ref().expect("validate gated to windows above");
@@ -235,12 +224,92 @@ fn build_cert_source(a: &Args) -> Option<CertificateSource<'_>> {
             password: a.pfx_password.as_deref(),
         })
     } else {
-        a.thumbprint.as_deref().map(|sha1| CertificateSource::Thumbprint {
-            sha1,
-            store: Some(a.cert_store.as_str()),
-            machine_store: a.machine_store,
-        })
+        a.thumbprint
+            .as_deref()
+            .map(|sha1| CertificateSource::Thumbprint {
+                sha1,
+                store: Some(a.cert_store.as_str()),
+                machine_store: a.machine_store,
+            })
     }
+}
+
+/// Load a `--pfx` into a native [`msix::RsaSigner`] (used when the native
+/// backend is active). Returns `None` if no `--pfx` was given, or when the
+/// `native` feature is off.
+#[cfg(feature = "native")]
+fn build_native_signer(a: &Args) -> Result<Option<msix::RsaSigner>> {
+    let Some(pfx_path) = a.pfx.as_ref() else {
+        return Ok(None);
+    };
+    let bytes =
+        std::fs::read(pfx_path).with_context(|| format!("read PFX {}", pfx_path.display()))?;
+    let signer = msix::RsaSigner::from_pfx(&bytes, a.pfx_password.as_deref().unwrap_or(""))
+        .with_context(|| format!("parse PFX {}", pfx_path.display()))?;
+    Ok(Some(signer))
+}
+
+#[cfg(not(feature = "native"))]
+fn build_native_signer(_a: &Args) -> Result<Option<()>> {
+    Ok(None)
+}
+
+/// Sign one artifact (`.msix` or `.msixbundle`). Prefers the native signer
+/// (no SignTool); falls back to SDK SignTool when the cert was given via
+/// `--thumbprint` (Windows cert store, native can't reach it).
+#[allow(clippy::needless_pass_by_value)]
+#[allow(unused_variables)]
+fn sign_one(
+    artifact: &std::path::Path,
+    #[cfg(feature = "native")] native_signer: Option<&msix::RsaSigner>,
+    #[cfg(not(feature = "native"))] native_signer: Option<&()>,
+    cert_source: Option<&CertificateSource<'_>>,
+    sdk_tools: Option<&SdkTools>,
+    a: &Args,
+    timestamp: bool,
+) -> Result<()> {
+    #[cfg(feature = "native")]
+    if let Some(signer) = native_signer {
+        msix::sign_package(artifact, signer)
+            .with_context(|| format!("native sign {}", artifact.display()))?;
+        if a.verify {
+            warn!("--verify ignored for native signing (SignTool only)");
+        }
+        return Ok(());
+    }
+    // SDK path: SignTool with thumbprint (or PFX when native is off).
+    let Some(cert) = cert_source else {
+        if a.sign_each || (artifact.extension().and_then(|e| e.to_str()) == Some("msixbundle")) {
+            warn!(
+                "no --pfx or --thumbprint supplied; skipping signing of {}",
+                artifact.display()
+            );
+        }
+        return Ok(());
+    };
+    let Some(tools) = sdk_tools else {
+        bail!("SDK signing requested but SDK tools not available");
+    };
+    let ts = if timestamp && !a.timestamp_url.is_empty() {
+        Some(a.timestamp_url.as_str())
+    } else {
+        None
+    };
+    sign_artifact(
+        tools,
+        &SignOptions {
+            artifact,
+            certificate: cert.clone(),
+            sip_dll: a.sip_dll.as_deref(),
+            timestamp_url: ts,
+            rfc3161: a.timestamp_mode.eq_ignore_ascii_case("rfc3161"),
+            signtool_override: a.signtool_path.as_deref(),
+        },
+    )?;
+    if a.verify {
+        verify_signature(tools, artifact)?;
+    }
+    Ok(())
 }
 
 /// Backend selection: if `native` is enabled, use NativeBackend for pack/bundle
@@ -255,11 +324,19 @@ fn build_backend(a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
     Ok((backend, tools))
 }
 
-#[cfg(all(not(feature = "native"), target_os = "windows", feature = "sdk-discovery"))]
+#[cfg(all(
+    not(feature = "native"),
+    target_os = "windows",
+    feature = "sdk-discovery"
+))]
 fn build_backend(a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
     let mut tools = locate_sdk_tools()?;
-    if let Some(p) = &a.signtool_path { tools.signtool = Some(p.clone()); }
-    if let Some(p) = &a.makepri_path { tools.makepri = Some(p.clone()); }
+    if let Some(p) = &a.signtool_path {
+        tools.signtool = Some(p.clone());
+    }
+    if let Some(p) = &a.makepri_path {
+        tools.makepri = Some(p.clone());
+    }
     let backend: Box<dyn MsixBackend> = Box::new(SdkBackend {
         tools: tools.clone(),
         overwrite: a.force,
@@ -281,8 +358,12 @@ fn build_backend(_a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> 
 #[cfg(all(target_os = "windows", feature = "sdk-discovery"))]
 fn locate_sdk_tools_opt(a: &Args) -> Result<Option<SdkTools>> {
     let mut tools = locate_sdk_tools()?;
-    if let Some(p) = &a.signtool_path { tools.signtool = Some(p.clone()); }
-    if let Some(p) = &a.makepri_path { tools.makepri = Some(p.clone()); }
+    if let Some(p) = &a.signtool_path {
+        tools.signtool = Some(p.clone());
+    }
+    if let Some(p) = &a.makepri_path {
+        tools.makepri = Some(p.clone());
+    }
     Ok(Some(tools))
 }
 

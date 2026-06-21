@@ -15,12 +15,13 @@ keywords = ["msix", "appx", "windows"]
 default = ["sdk-discovery", "native"]
 # Forward to msixbundle: SDK tool discovery (Windows-only).
 sdk-discovery = ["msixbundle/sdk-discovery"]
-# Forward to msixbundle: pure-Rust backend (cross-platform).
-native = ["msixbundle/native"]
+# Forward to msixbundle + pull msix directly (for RsaSigner / sign_package).
+native = ["msixbundle/native", "dep:msix"]
 
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
+msix = { path = "../msix", version = "1.1", optional = true }
 msixbundle = { path = "../msixbundle", version = "1.1.4", default-features = false }

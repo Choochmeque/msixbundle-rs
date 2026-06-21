@@ -12,8 +12,8 @@
 //!   - Same extension, different content-type → emit `<Override>` for this file.
 //! - Else (no extension) → emit `<Override>` for this file.
 
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
+use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use std::collections::HashMap;
 use std::io::Cursor;
 
@@ -44,7 +44,10 @@ pub fn by_extension(ext: &str) -> (&'static str, Compression) {
         "cab" => ("application/vnd.ms-cab-compressed", None),
         "doc" | "dot" => ("application/msword", Normal),
         "docm" | "dotm" => ("application/vnd.ms-word.document.macroenabled.12", None),
-        "docx" | "dotx" => ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", None),
+        "docx" | "dotx" => (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            None,
+        ),
         "dll" | "exe" => ("application/x-msdownload", Normal),
         "dtd" => ("application/xml-dtd", Normal),
         "gz" => ("application/x-gzip-compressed", None),
@@ -53,14 +56,32 @@ pub fn by_extension(ext: &str) -> (&'static str, Compression) {
         "p7s" => ("application/x-pkcs7-signature", Normal),
         "pdf" => ("application/pdf", Normal),
         "ps" => ("application/postscript", Normal),
-        "potm" => ("application/vnd.ms-powerpoint.template.macroenabled.12", None),
-        "potx" => ("application/vnd.openxmlformats-officedocument.presentationml.template", None),
+        "potm" => (
+            "application/vnd.ms-powerpoint.template.macroenabled.12",
+            None,
+        ),
+        "potx" => (
+            "application/vnd.openxmlformats-officedocument.presentationml.template",
+            None,
+        ),
         "ppam" => ("application/vnd.ms-powerpoint.addin.macroenabled.12", None),
-        "ppsm" => ("application/vnd.ms-powerpoint.slideshow.macroenabled.12", None),
-        "ppsx" => ("application/vnd.openxmlformats-officedocument.presentationml.slideshow", None),
+        "ppsm" => (
+            "application/vnd.ms-powerpoint.slideshow.macroenabled.12",
+            None,
+        ),
+        "ppsx" => (
+            "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+            None,
+        ),
         "ppt" | "pot" | "pps" | "ppa" => ("application/vnd.ms-powerpoint", Normal),
-        "pptm" => ("application/vnd.ms-powerpoint.presentation.macroenabled.12", None),
-        "pptx" => ("application/vnd.openxmlformats-officedocument.presentationml.presentation", None),
+        "pptm" => (
+            "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+            None,
+        ),
+        "pptx" => (
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            None,
+        ),
         "rar" => ("application/x-rar-compressed", None),
         "rss" => ("application/rss+xml", Normal),
         "soap" => ("application/soap+xml", Normal),
@@ -71,11 +92,20 @@ pub fn by_extension(ext: &str) -> (&'static str, Compression) {
         "xhtml" => ("application/xhtml+xml", Normal),
         "xlam" => ("application/vnd.ms-excel.addin.macroenabled.12", None),
         "xls" | "xlt" | "xla" => ("application/vnd.ms-excel", Normal),
-        "xlsb" => ("application/vnd.ms-excel.sheet.binary.macroEnabled.12", None),
+        "xlsb" => (
+            "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+            None,
+        ),
         "xlsm" => ("application/vnd.ms-excel.sheet.macroEnabled.12", None),
-        "xlsx" => ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", None),
+        "xlsx" => (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            None,
+        ),
         "xltm" => ("application/vnd.ms-excel.template.macroEnabled.12", None),
-        "xltx" => ("application/vnd.openxmlformats-officedocument.spreadsheetml.template", None),
+        "xltx" => (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+            None,
+        ),
         "xsl" | "xslt" => ("application/xslt+xml", Normal),
         "zip" => ("application/x-zip-compressed", None),
         // text

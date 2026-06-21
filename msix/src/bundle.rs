@@ -24,14 +24,14 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
+use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 
-use crate::block_map::{BlockMapWriter, BLOCK_SIZE};
+use crate::Result;
+use crate::block_map::{BLOCK_SIZE, BlockMapWriter};
 use crate::content_types::{self, ContentTypeWriter};
 use crate::identity::Resource;
 use crate::zip_writer::ZipWriter;
-use crate::Result;
 
 const BUNDLE_NS: &str = "http://schemas.microsoft.com/appx/2013/bundle";
 const SCHEMA_VERSION: &str = "3.0";
@@ -83,7 +83,11 @@ pub struct ContainedPackage {
     pub resources: Vec<Resource>,
 }
 
-pub fn bundle(packages: &[ContainedPackage], output: &Path, identity: &BundleIdentity) -> Result<()> {
+pub fn bundle(
+    packages: &[ContainedPackage],
+    output: &Path,
+    identity: &BundleIdentity,
+) -> Result<()> {
     if packages.is_empty() {
         return Err(crate::MsixError::EmptyBundle);
     }
@@ -96,7 +100,11 @@ pub fn bundle(packages: &[ContainedPackage], output: &Path, identity: &BundleIde
     // 1) Pack contained .msix files (STORED), recording (offset, size).
     let mut records = Vec::with_capacity(packages.len());
     for pkg in packages {
-        content_types.add_content_type(&pkg.filename, content_types::by_extension("msix").0, false)?;
+        content_types.add_content_type(
+            &pkg.filename,
+            content_types::by_extension("msix").0,
+            false,
+        )?;
         let bytes = std::fs::read(&pkg.path)?;
         zip.start_file(&pkg.filename, false)?;
         let data_offset = zip.position()?;
@@ -131,6 +139,9 @@ pub fn bundle(packages: &[ContainedPackage], output: &Path, identity: &BundleIde
     // 4) Close and write the bundle's blockmap.
     let block_map_bytes = block_map.finish()?;
     content_types.add_content_type(BLOCKMAP_PATH, content_types::BLOCKMAP_CT, true)?;
+    // Pre-declare the signature override so [Content_Types].xml is stable
+    // across signing (see package_writer for the same rationale).
+    content_types.add_content_type("AppxSignature.p7x", content_types::SIGNATURE_CT, true)?;
     zip.start_file(BLOCKMAP_PATH, true)?;
     for chunk in block_map_bytes.chunks(BLOCK_SIZE) {
         zip.write_block(chunk)?;
@@ -161,7 +172,11 @@ struct PackageRecord {
 
 fn build_bundle_manifest(identity: &BundleIdentity, records: &[PackageRecord]) -> Result<Vec<u8>> {
     let mut xml = Writer::new(std::io::Cursor::new(Vec::with_capacity(2048)));
-    xml.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), Some("no"))))?;
+    xml.write_event(Event::Decl(BytesDecl::new(
+        "1.0",
+        Some("UTF-8"),
+        Some("no"),
+    )))?;
 
     let mut bundle_el = BytesStart::new("Bundle");
     bundle_el.push_attribute(("xmlns", BUNDLE_NS));

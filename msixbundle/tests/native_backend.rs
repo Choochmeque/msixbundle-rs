@@ -66,7 +66,10 @@ fn native_backend_pack_then_bundle() {
         "AppxBlockMap.xml",
         "[Content_Types].xml",
     ] {
-        assert!(names.contains(&must.to_string()), "missing {must} in {names:?}");
+        assert!(
+            names.contains(&must.to_string()),
+            "missing {must} in {names:?}"
+        );
     }
 
     let mut bm = String::new();
@@ -75,8 +78,14 @@ fn native_backend_pack_then_bundle() {
         .read_to_string(&mut bm)
         .expect("read bundle manifest as utf-8");
     // Identity was extracted from the first package's AppxManifest.xml.
-    assert!(bm.contains(r#"Name="Test.NativeBackend""#), "manifest = {bm}");
-    assert!(bm.contains(r#"Publisher="CN=NativeBackendTest""#), "manifest = {bm}");
+    assert!(
+        bm.contains(r#"Name="Test.NativeBackend""#),
+        "manifest = {bm}"
+    );
+    assert!(
+        bm.contains(r#"Publisher="CN=NativeBackendTest""#),
+        "manifest = {bm}"
+    );
     assert!(bm.contains(r#"Version="2.0.0.0""#), "manifest = {bm}");
     assert!(bm.contains(r#"Architecture="x64""#), "manifest = {bm}");
     assert!(bm.contains(r#"Architecture="arm64""#), "manifest = {bm}");

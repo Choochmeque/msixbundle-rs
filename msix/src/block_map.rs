@@ -16,9 +16,9 @@
 //! </BlockMap>
 //! ```
 
-use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
+use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use quick_xml::Writer;
+use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use sha2::{Digest, Sha256};
 use std::io::Cursor;
 
@@ -61,7 +61,11 @@ impl BlockMapWriter {
     }
 
     /// Append a `<Block>` element. `compressed_size = None` for STORED entries.
-    pub fn add_block(&mut self, raw_block: &[u8], compressed_size: Option<u32>) -> quick_xml::Result<()> {
+    pub fn add_block(
+        &mut self,
+        raw_block: &[u8],
+        compressed_size: Option<u32>,
+    ) -> quick_xml::Result<()> {
         let mut hasher = Sha256::new();
         hasher.update(raw_block);
         let hash = B64.encode(hasher.finalize());
@@ -81,7 +85,8 @@ impl BlockMapWriter {
     }
 
     pub fn finish(mut self) -> quick_xml::Result<Vec<u8>> {
-        self.xml.write_event(Event::End(BytesEnd::new("BlockMap")))?;
+        self.xml
+            .write_event(Event::End(BytesEnd::new("BlockMap")))?;
         Ok(self.xml.into_inner().into_inner())
     }
 }

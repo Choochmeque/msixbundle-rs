@@ -82,7 +82,11 @@ impl<W: Write + Seek> ZipWriter<W> {
             });
         }
         let lfh_offset = self.inner.stream_position()?;
-        let method = if compress { METHOD_DEFLATE } else { METHOD_STORED };
+        let method = if compress {
+            METHOD_DEFLATE
+        } else {
+            METHOD_STORED
+        };
 
         write_lfh(&mut self.inner, name, method, 0, 0, 0)?;
         // name.len() ≤ u16::MAX < u32::MAX, so 30 + len always fits in u32.
@@ -207,10 +211,12 @@ fn deflate_block<W: Write>(
 
         if produced > 0 {
             out.write_all(&buf[..produced])?;
-            written = written.checked_add(produced as u32).ok_or(MsixError::Zip32Limit {
-                what: "compressed block size",
-                limit: u32::MAX as u64,
-            })?;
+            written = written
+                .checked_add(produced as u32)
+                .ok_or(MsixError::Zip32Limit {
+                    what: "compressed block size",
+                    limit: u32::MAX as u64,
+                })?;
         }
         in_pos += consumed;
 
@@ -290,12 +296,7 @@ fn name_len_u16(name: &str) -> Result<u16> {
     })
 }
 
-fn write_eocd<W: Write>(
-    w: &mut W,
-    entry_count: u16,
-    cd_size: u32,
-    cd_offset: u32,
-) -> Result<()> {
+fn write_eocd<W: Write>(w: &mut W, entry_count: u16, cd_size: u32, cd_offset: u32) -> Result<()> {
     w.write_all(&EOCD_SIG.to_le_bytes())?;
     w.write_all(&0u16.to_le_bytes())?; // disk number
     w.write_all(&0u16.to_le_bytes())?; // disk with CD

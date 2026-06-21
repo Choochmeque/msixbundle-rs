@@ -4,7 +4,7 @@
 use std::fs;
 use std::io::Read;
 
-use msix::{pack, PackOptions};
+use msix::{PackOptions, pack};
 
 const MANIFEST_XML: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
@@ -38,11 +38,26 @@ fn pack_minimal_dir() {
     let mut zip = zip::ZipArchive::new(f).expect("parse output as zip");
     let names: Vec<String> = zip.file_names().map(String::from).collect();
 
-    assert!(names.contains(&"AppxManifest.xml".to_string()), "names = {names:?}");
-    assert!(names.contains(&"AppxBlockMap.xml".to_string()), "names = {names:?}");
-    assert!(names.contains(&"[Content_Types].xml".to_string()), "names = {names:?}");
-    assert!(names.contains(&"hello.txt".to_string()), "names = {names:?}");
-    assert!(names.contains(&"Assets/Logo.png".to_string()), "names = {names:?}");
+    assert!(
+        names.contains(&"AppxManifest.xml".to_string()),
+        "names = {names:?}"
+    );
+    assert!(
+        names.contains(&"AppxBlockMap.xml".to_string()),
+        "names = {names:?}"
+    );
+    assert!(
+        names.contains(&"[Content_Types].xml".to_string()),
+        "names = {names:?}"
+    );
+    assert!(
+        names.contains(&"hello.txt".to_string()),
+        "names = {names:?}"
+    );
+    assert!(
+        names.contains(&"Assets/Logo.png".to_string()),
+        "names = {names:?}"
+    );
 
     // Manifest content roundtrips byte-for-byte.
     let mut s = String::new();
@@ -99,7 +114,10 @@ fn blocks_inside<'a>(bm: &'a str, name: &str) -> Vec<&'a str> {
     let mut rest = body;
     while let Some(start) = rest.find("<Block") {
         let after = &rest[start..];
-        let end = after.find("/>").expect("expected self-closing <Block ... />") + 2;
+        let end = after
+            .find("/>")
+            .expect("expected self-closing <Block ... />")
+            + 2;
         out.push(&after[..end]);
         rest = &after[end..];
     }

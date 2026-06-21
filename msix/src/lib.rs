@@ -11,11 +11,13 @@ mod bundle;
 mod content_types;
 mod identity;
 mod package_writer;
+mod sign;
 mod zip_writer;
 
-pub use bundle::{bundle, Architecture, BundleIdentity, ContainedPackage};
-pub use identity::{read_identity, PackageIdentity, Resource};
-pub use package_writer::{pack, PackOptions};
+pub use bundle::{Architecture, BundleIdentity, ContainedPackage, bundle};
+pub use identity::{PackageIdentity, Resource, read_identity};
+pub use package_writer::{PackOptions, pack};
+pub use sign::{Digests, RsaSigner, Signer, compute_digests, sign_package};
 
 #[derive(thiserror::Error, Debug)]
 pub enum MsixError {

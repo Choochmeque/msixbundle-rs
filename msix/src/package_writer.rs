@@ -19,7 +19,7 @@ use std::path::Path;
 
 use walkdir::WalkDir;
 
-use crate::block_map::{BlockMapWriter, BLOCK_SIZE};
+use crate::block_map::{BLOCK_SIZE, BlockMapWriter};
 use crate::content_types::{self, Compression, ContentTypeWriter};
 use crate::zip_writer::ZipWriter;
 use crate::{MsixError, Result};
@@ -71,10 +71,19 @@ pub fn pack(source_dir: &Path, output: &Path, _opts: &PackOptions) -> Result<()>
     let block_map_bytes = block_map.finish()?;
     let _ = write_zip_entry(&mut zip, FOOTPRINT_BLOCKMAP, &block_map_bytes, true)?;
     content_types.add_content_type(FOOTPRINT_BLOCKMAP, content_types::BLOCKMAP_CT, true)?;
+    // Pre-declare the signature override so [Content_Types].xml is stable across
+    // signing — `sign_package` only appends the AppxSignature.p7x entry and
+    // doesn't have to rewrite content types (which would invalidate AXCT).
+    content_types.add_content_type(FOOTPRINT_SIGNATURE, content_types::SIGNATURE_CT, true)?;
 
     // [Content_Types].xml — generated last, no entry in itself, no entry in blockmap.
     let content_types_bytes = content_types.finish()?;
-    let _ = write_zip_entry(&mut zip, FOOTPRINT_CONTENT_TYPES, &content_types_bytes, true)?;
+    let _ = write_zip_entry(
+        &mut zip,
+        FOOTPRINT_CONTENT_TYPES,
+        &content_types_bytes,
+        true,
+    )?;
 
     zip.finish()?;
     Ok(())
