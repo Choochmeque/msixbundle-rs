@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use clap::Parser;
 use log::{info, warn};
 use std::path::PathBuf;
@@ -33,7 +33,6 @@ struct Args {
     thumbprint: Option<String>,
 
     /// Certificate store name. Common: "My" (Personal), "Root", "CA".
-    /// See: https://learn.microsoft.com/en-us/dotnet/framework/tools/signtool-exe
     #[arg(long, default_value = "My", requires = "thumbprint")]
     cert_store: String,
 
@@ -61,7 +60,7 @@ struct Args {
     #[arg(long, value_parser = ["rfc3161","authenticode"], default_value = "rfc3161")]
     timestamp_mode: String,
 
-    /// Generate resources.pri with MakePri before packing
+    /// Generate resources.pri with MakePri before packing (Windows only)
     #[arg(long)]
     makepri: bool,
 
@@ -81,11 +80,11 @@ struct Args {
     #[arg(long, requires = "makepri")]
     makepri_keep_config: bool,
 
-    /// Validate packages with MakeAppx after build
+    /// Validate packages with appcert after build (Windows only)
     #[arg(long)]
     validate: bool,
 
-    /// Verify signatures with SignTool after signing
+    /// Verify signatures with SignTool after signing (Windows only)
     #[arg(long)]
     verify: bool,
 
@@ -112,9 +111,7 @@ fn resolve_path(p: &std::path::Path) -> Result<PathBuf> {
 fn main() -> Result<()> {
     let a = Args::parse();
     if a.verbose {
-        unsafe {
-            std::env::set_var("RUST_LOG", "info");
-        }
+        unsafe { std::env::set_var("RUST_LOG", "info"); }
     }
     env_logger::init();
 
@@ -124,13 +121,16 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&a.out_dir)?;
     let out_dir = resolve_path(&a.out_dir)?;
 
-    let mut tools = locate_sdk_tools()?;
-    if let Some(p) = &a.signtool_path {
-        tools.signtool = Some(p.clone());
+    let cert_source = build_cert_source(&a);
+    let sdk_requested = a.makepri || a.validate || a.verify || cert_source.is_some() || a.sign_each;
+    if sdk_requested && !cfg!(target_os = "windows") {
+        bail!(
+            "--makepri / --validate / --verify / --pfx / --thumbprint / --sign-each \
+             require Windows (native signing/validation not yet implemented)"
+        );
     }
-    if let Some(p) = &a.makepri_path {
-        tools.makepri = Some(p.clone());
-    }
+
+    let (backend, sdk_tools) = build_backend(&a)?;
 
     // Pack per-arch
     let mut built: Vec<(String, PathBuf)> = Vec::new();
@@ -139,24 +139,12 @@ fn main() -> Result<()> {
     if let Some(dir) = &a.dir_x64 {
         let dir = resolve_path(dir)?;
         let m = read_manifest_info(&dir)?;
-        if a.makepri {
-            let pri = compile_resources_pri(
-                &tools,
-                &PriOptions {
-                    appx_content_dir: &dir,
-                    default_language: a.makepri_default_language.as_str(),
-                    target_os_version: a.makepri_target_os_version.as_str(),
-                    keep_priconfig: a.makepri_keep_config,
-                    overwrite: a.force,
-                    makepri_override: None,
-                },
-            )?;
-            info!("x64 PRI: {}", pri.display());
-        }
+        maybe_makepri(sdk_tools.as_ref(), &a, &dir, "x64")?;
         info = Some(m.clone());
         info!("x64: {}", dir.display());
-        let msix = pack_arch(&tools, &dir, &out_dir, &m, "x64", a.force)?;
-        built.push(("x64".into(), msix));
+        let out = out_dir.join(format!("{}_{}_x64.msix", m.display_name, m.version));
+        backend.pack(&dir, &out)?;
+        built.push(("x64".into(), out));
     }
 
     if let Some(dir) = &a.dir_arm64 {
@@ -164,74 +152,44 @@ fn main() -> Result<()> {
         let m = read_manifest_info(&dir)?;
         if let Some(i) = &info {
             if i.version != m.version {
-                bail!(
-                    "Version mismatch: manifests differ ({} vs {})",
-                    i.version,
-                    m.version
-                );
+                bail!("Version mismatch: {} vs {}", i.version, m.version);
             }
         } else {
             info = Some(m.clone());
         }
-        if a.makepri {
-            let pri = compile_resources_pri(
-                &tools,
-                &PriOptions {
-                    appx_content_dir: &dir,
-                    default_language: a.makepri_default_language.as_str(),
-                    target_os_version: a.makepri_target_os_version.as_str(),
-                    keep_priconfig: a.makepri_keep_config,
-                    overwrite: a.force,
-                    makepri_override: None,
-                },
-            )?;
-            info!("arm64 PRI: {}", pri.display());
-        }
+        maybe_makepri(sdk_tools.as_ref(), &a, &dir, "arm64")?;
         info!("arm64: {}", dir.display());
-        let msix = pack_arch(&tools, &dir, &out_dir, &m, "arm64", a.force)?;
-        built.push(("arm64".into(), msix));
+        let out = out_dir.join(format!("{}_{}_arm64.msix", m.display_name, m.version));
+        backend.pack(&dir, &out)?;
+        built.push(("arm64".into(), out));
     }
 
     let info = info.expect("manifest info");
+
     if a.validate {
+        let tools = sdk_tools.as_ref().expect("validate gated to windows above");
         for (_, p) in &built {
-            validate_package(&tools, p)?;
+            validate_package(tools, p)?;
         }
     }
 
-    // Determine certificate source for signing
-    let cert_source: Option<CertificateSource> = if let Some(pfx) = &a.pfx {
-        Some(CertificateSource::Pfx {
-            path: pfx,
-            password: a.pfx_password.as_deref(),
-        })
-    } else if let Some(thumbprint) = &a.thumbprint {
-        Some(CertificateSource::Thumbprint {
-            sha1: thumbprint,
-            store: Some(a.cert_store.as_str()),
-            machine_store: a.machine_store,
-        })
-    } else {
-        None
-    };
-
     // Sign per-arch (optional, often skipped)
     if a.sign_each {
-        if let Some(ref cert) = cert_source {
+        if let (Some(tools), Some(cert)) = (sdk_tools.as_ref(), cert_source.as_ref()) {
             for (_, msix) in &built {
                 sign_artifact(
-                    &tools,
+                    tools,
                     &SignOptions {
                         artifact: msix,
                         certificate: cert.clone(),
                         sip_dll: a.sip_dll.as_deref(),
-                        timestamp_url: None, // usually skip timestamp on inner packages
+                        timestamp_url: None,
                         rfc3161: true,
                         signtool_override: a.signtool_path.as_deref(),
                     },
                 )?;
                 if a.verify {
-                    verify_signature(&tools, msix)?;
+                    verify_signature(tools, msix)?;
                 }
             }
         } else {
@@ -240,18 +198,16 @@ fn main() -> Result<()> {
     }
 
     // Bundle
-    let bundle = build_bundle(&tools, &out_dir, &built, &info, a.force)?;
+    let bundle = out_dir.join(format!("{}_{}.msixbundle", info.display_name, info.version));
+    backend.bundle(&built, &bundle)?;
     info!("bundle: {}", bundle.display());
 
     // Sign bundle
     if let Some(ref cert) = cert_source {
-        let ts = if a.timestamp_url.is_empty() {
-            None
-        } else {
-            Some(a.timestamp_url.as_str())
-        };
+        let tools = sdk_tools.as_ref().expect("signing gated to windows above");
+        let ts = if a.timestamp_url.is_empty() { None } else { Some(a.timestamp_url.as_str()) };
         sign_artifact(
-            &tools,
+            tools,
             &SignOptions {
                 artifact: &bundle,
                 certificate: cert.clone(),
@@ -262,14 +218,83 @@ fn main() -> Result<()> {
             },
         )?;
         if a.verify {
-            verify_signature(&tools, &bundle)?;
+            verify_signature(tools, &bundle)?;
         }
     }
 
     if a.validate {
-        validate_package(&tools, &bundle)?;
+        let tools = sdk_tools.as_ref().expect("validate gated to windows above");
+        validate_package(tools, &bundle)?;
     }
 
-    println!("✅ {}", bundle.display());
+    println!("ok {}", bundle.display());
+    Ok(())
+}
+
+fn build_cert_source(a: &Args) -> Option<CertificateSource<'_>> {
+    if let Some(pfx) = &a.pfx {
+        Some(CertificateSource::Pfx {
+            path: pfx,
+            password: a.pfx_password.as_deref(),
+        })
+    } else {
+        a.thumbprint.as_deref().map(|sha1| CertificateSource::Thumbprint {
+            sha1,
+            store: Some(a.cert_store.as_str()),
+            machine_store: a.machine_store,
+        })
+    }
+}
+
+/// On Windows, build the SDK backend (MakeAppx.exe). Elsewhere, build the
+/// native backend. The choice is determined entirely by `target_os`; no
+/// runtime flag is exposed because each platform only has one viable backend.
+#[cfg(all(target_os = "windows", feature = "sdk-discovery"))]
+fn build_backend(a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
+    let mut tools = locate_sdk_tools()?;
+    if let Some(p) = &a.signtool_path { tools.signtool = Some(p.clone()); }
+    if let Some(p) = &a.makepri_path { tools.makepri = Some(p.clone()); }
+    let backend: Box<dyn MsixBackend> = Box::new(SdkBackend {
+        tools: tools.clone(),
+        overwrite: a.force,
+    });
+    Ok((backend, Some(tools)))
+}
+
+#[cfg(all(not(target_os = "windows"), feature = "native"))]
+fn build_backend(_a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
+    Ok((Box::new(NativeBackend), None))
+}
+
+#[cfg(not(any(
+    all(target_os = "windows", feature = "sdk-discovery"),
+    all(not(target_os = "windows"), feature = "native"),
+)))]
+fn build_backend(_a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
+    bail!("no backend available for this build (need sdk-discovery on Windows or native elsewhere)")
+}
+
+fn maybe_makepri(
+    tools: Option<&SdkTools>,
+    a: &Args,
+    dir: &std::path::Path,
+    arch: &str,
+) -> Result<()> {
+    if !a.makepri {
+        return Ok(());
+    }
+    let tools = tools.expect("makepri gated to windows above");
+    let pri = compile_resources_pri(
+        tools,
+        &PriOptions {
+            appx_content_dir: dir,
+            default_language: a.makepri_default_language.as_str(),
+            target_os_version: a.makepri_target_os_version.as_str(),
+            keep_priconfig: a.makepri_keep_config,
+            overwrite: a.force,
+            makepri_override: None,
+        },
+    )?;
+    info!("{arch} PRI: {}", pri.display());
     Ok(())
 }

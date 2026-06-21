@@ -9,10 +9,12 @@
 mod block_map;
 mod bundle;
 mod content_types;
+mod identity;
 mod package_writer;
 mod zip_writer;
 
 pub use bundle::{bundle, Architecture, BundleIdentity, ContainedPackage};
+pub use identity::{read_identity, PackageIdentity};
 pub use package_writer::{pack, PackOptions};
 
 #[derive(thiserror::Error, Debug)]
@@ -23,6 +25,10 @@ pub enum MsixError {
     EmptyBundle,
     #[error("invalid zip writer state: {0}")]
     InvalidState(&'static str),
+    #[error("manifest missing required field: {0}")]
+    ManifestField(&'static str),
+    #[error("unknown ProcessorArchitecture: {0}")]
+    UnknownArchitecture(String),
     /// Hit a hard limit of the traditional 32-bit ZIP format. ZIP64 is not
     /// yet implemented; once it is, these become non-errors.
     #[error("zip32 limit exceeded: {what} (> {limit}); ZIP64 not yet implemented")]

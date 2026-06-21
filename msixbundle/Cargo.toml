@@ -6,20 +6,27 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 authors.workspace = true
-description = "Rust library to pack per-arch MSIX and build/sign .msixbundle using Windows SDK tools"
+description = "Rust library to pack per-arch MSIX and build/sign .msixbundle (Windows SDK or pure-Rust backend)"
 readme = "README.md"
 categories = ["os::windows-apis", "development-tools"]
 keywords = ["msix", "appx", "windows", "makeappx", "signtool"]
 
 [features]
-default = ["sdk-discovery"]
+default = ["sdk-discovery", "native"]
+# Auto-discover Windows SDK tools (MakeAppx.exe etc.) via registry. Windows-only.
 sdk-discovery = ["dep:winreg"]
+# Cross-platform pure-Rust backend (NativeBackend impl of MsixBackend).
+native = ["dep:msix"]
 
 [dependencies]
 anyhow = "1"
 thiserror = "2"
 roxmltree = "0.21"
+msix = { version = "1.1", path = "../msix", optional = true }
+
+[target.'cfg(windows)'.dependencies]
 winreg = { version = "0.56", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+zip = { version = "2", default-features = false, features = ["deflate"] }
