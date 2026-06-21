@@ -243,10 +243,19 @@ fn build_cert_source(a: &Args) -> Option<CertificateSource<'_>> {
     }
 }
 
-/// On Windows, build the SDK backend (MakeAppx.exe). Elsewhere, build the
-/// native backend. The choice is determined entirely by `target_os`; no
-/// runtime flag is exposed because each platform only has one viable backend.
-#[cfg(all(target_os = "windows", feature = "sdk-discovery"))]
+/// Backend selection: if `native` is enabled, use NativeBackend for pack/bundle
+/// on every OS (avoids shelling out to MakeAppx). SdkBackend is the fallback
+/// for builds with `native` disabled (Windows only). The SDK tools are still
+/// located when `sdk-discovery` is on, because sign/validate/verify/makepri
+/// always go through SignTool/appcert/MakePri — those have no native impl yet.
+#[cfg(feature = "native")]
+fn build_backend(a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
+    let backend: Box<dyn MsixBackend> = Box::new(NativeBackend);
+    let tools = locate_sdk_tools_opt(a)?;
+    Ok((backend, tools))
+}
+
+#[cfg(all(not(feature = "native"), target_os = "windows", feature = "sdk-discovery"))]
 fn build_backend(a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
     let mut tools = locate_sdk_tools()?;
     if let Some(p) = &a.signtool_path { tools.signtool = Some(p.clone()); }
@@ -258,17 +267,28 @@ fn build_backend(a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
     Ok((backend, Some(tools)))
 }
 
-#[cfg(all(not(target_os = "windows"), feature = "native"))]
-fn build_backend(_a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
-    Ok((Box::new(NativeBackend), None))
-}
-
 #[cfg(not(any(
+    feature = "native",
     all(target_os = "windows", feature = "sdk-discovery"),
-    all(not(target_os = "windows"), feature = "native"),
 )))]
 fn build_backend(_a: &Args) -> Result<(Box<dyn MsixBackend>, Option<SdkTools>)> {
-    bail!("no backend available for this build (need sdk-discovery on Windows or native elsewhere)")
+    bail!("no backend available (enable `native` or, on Windows, `sdk-discovery`)")
+}
+
+/// On Windows with sdk-discovery, locate SDK tools (for sign/validate/verify/
+/// makepri). Elsewhere, return None — the early `sdk_requested` bail in
+/// `main` catches misuse.
+#[cfg(all(target_os = "windows", feature = "sdk-discovery"))]
+fn locate_sdk_tools_opt(a: &Args) -> Result<Option<SdkTools>> {
+    let mut tools = locate_sdk_tools()?;
+    if let Some(p) = &a.signtool_path { tools.signtool = Some(p.clone()); }
+    if let Some(p) = &a.makepri_path { tools.makepri = Some(p.clone()); }
+    Ok(Some(tools))
+}
+
+#[cfg(not(all(target_os = "windows", feature = "sdk-discovery")))]
+fn locate_sdk_tools_opt(_a: &Args) -> Result<Option<SdkTools>> {
+    Ok(None)
 }
 
 fn maybe_makepri(
