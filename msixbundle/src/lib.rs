@@ -901,28 +901,34 @@ pub fn validate_package(tools: &SdkTools, msix_or_bundle: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Backend abstraction for the two MSIX packing paths.
+/// Backend abstraction for the two MSIX packing paths. Signatures intentionally
+/// match the existing free functions [`pack_arch`] / [`build_bundle`] so the
+/// SDK impl can delegate without rewriting any working invocation logic.
 ///
-/// - [`SdkBackend`] shells out to MakeAppx.exe (Windows-only; existing behavior).
+/// - [`SdkBackend`] is a thin wrapper around [`pack_arch`] + [`build_bundle`]
+///   (Windows-only; existing MakeAppx.exe path).
 /// - [`NativeBackend`] uses the pure-Rust `msix` crate (cross-platform, behind
-///   the `native` feature flag).
-///
-/// Both backends take pre-decided output paths — naming (which currently uses
-/// [`ManifestInfo`]) is the caller's concern, not the backend's.
+///   the `native` feature flag). It mirrors the SDK naming convention so the
+///   resulting filenames match.
 pub trait MsixBackend {
-    /// Pack `source_dir` (a directory containing `AppxManifest.xml` at its
-    /// root) into a single `.msix` at `output`.
-    fn pack(&self, source_dir: &Path, output: &Path) -> Result<()>;
+    fn pack_arch(
+        &self,
+        appx_dir: &Path,
+        out_dir: &Path,
+        info: &ManifestInfo,
+        arch: &str,
+    ) -> Result<PathBuf>;
 
-    /// Bundle multiple per-arch `.msix` files into a single `.msixbundle` at
-    /// `output`. Each entry in `packages` is `(architecture, path)`; the
-    /// architecture string is `"x64"`, `"arm64"`, `"x86"`, `"arm"`, or
-    /// `"neutral"`.
-    fn bundle(&self, packages: &[(String, PathBuf)], output: &Path) -> Result<()>;
+    fn build_bundle(
+        &self,
+        out_dir: &Path,
+        built: &[(String, PathBuf)],
+        info: &ManifestInfo,
+    ) -> Result<PathBuf>;
 }
 
-/// Windows-SDK backend (`MakeAppx.exe`). Requires `SdkTools` paths populated
-/// (typically via [`locate_sdk_tools`]).
+/// Windows-SDK backend. Delegates to the free [`pack_arch`] / [`build_bundle`]
+/// functions verbatim — no MakeAppx args are reshaped here.
 #[cfg(target_os = "windows")]
 pub struct SdkBackend {
     pub tools: SdkTools,
@@ -931,89 +937,66 @@ pub struct SdkBackend {
 
 #[cfg(target_os = "windows")]
 impl MsixBackend for SdkBackend {
-    fn pack(&self, source_dir: &Path, output: &Path) -> Result<()> {
-        let mut args: Vec<OsString> = vec![
-            "pack".into(),
-            "/d".into(),
-            source_dir.as_os_str().into(),
-            "/p".into(),
-            output.as_os_str().into(),
-            "/h".into(),
-            "SHA256".into(),
-        ];
-        args.push(if self.overwrite { "/o".into() } else { "/no".into() });
-        let status = Command::new(&self.tools.makeappx)
-            .args(args)
-            .status()
-            .context("run MakeAppx pack")?;
-        if !status.success() {
-            return Err(MsixError::MakeAppx("pack".into()).into());
-        }
-        Ok(())
+    fn pack_arch(
+        &self,
+        appx_dir: &Path,
+        out_dir: &Path,
+        info: &ManifestInfo,
+        arch: &str,
+    ) -> Result<PathBuf> {
+        pack_arch(&self.tools, appx_dir, out_dir, info, arch, self.overwrite)
     }
 
-    fn bundle(&self, packages: &[(String, PathBuf)], output: &Path) -> Result<()> {
-        let out_dir = output.parent().unwrap_or_else(|| Path::new("."));
-        let map = out_dir.join("bundlemap.txt");
-        let mut s = String::from("[Files]\n");
-        for (_arch, path) in packages {
-            let filename = path
-                .file_name()
-                .map(|f| f.to_string_lossy())
-                .unwrap_or_else(|| path.to_string_lossy());
-            s.push('"');
-            s.push_str(&path.to_string_lossy());
-            s.push_str("\" \"");
-            s.push_str(&filename);
-            s.push_str("\"\n");
-        }
-        fs::write(&map, s).context("write bundlemap.txt")?;
-        let mut args: Vec<OsString> = vec![
-            "bundle".into(),
-            "/d".into(),
-            out_dir.as_os_str().into(),
-            "/f".into(),
-            map.as_os_str().into(),
-            "/p".into(),
-            output.as_os_str().into(),
-        ];
-        args.push(if self.overwrite { "/o".into() } else { "/no".into() });
-        let status = Command::new(&self.tools.makeappx)
-            .args(args)
-            .status()
-            .context("run MakeAppx bundle")?;
-        if !status.success() {
-            return Err(MsixError::MakeAppx("bundle".into()).into());
-        }
-        Ok(())
+    fn build_bundle(
+        &self,
+        out_dir: &Path,
+        built: &[(String, PathBuf)],
+        info: &ManifestInfo,
+    ) -> Result<PathBuf> {
+        build_bundle(&self.tools, out_dir, built, info, self.overwrite)
     }
 }
 
 /// Cross-platform pure-Rust backend. Available when the `native` feature is on.
+/// Mirrors the SDK naming convention (`{display_name}_{version}_{arch}.msix`
+/// and `{display_name}_{version}.msixbundle`) so output filenames match.
 #[cfg(feature = "native")]
 pub struct NativeBackend;
 
 #[cfg(feature = "native")]
 impl MsixBackend for NativeBackend {
-    fn pack(&self, source_dir: &Path, output: &Path) -> Result<()> {
-        msix::pack(source_dir, output, &msix::PackOptions::default())
-            .map_err(|e| anyhow::anyhow!("native pack: {e}"))
+    fn pack_arch(
+        &self,
+        appx_dir: &Path,
+        out_dir: &Path,
+        info: &ManifestInfo,
+        arch: &str,
+    ) -> Result<PathBuf> {
+        let out = out_dir.join(format!("{}_{}_{}.msix", info.display_name, info.version, arch));
+        msix::pack(appx_dir, &out, &msix::PackOptions::default())
+            .map_err(|e| anyhow::anyhow!("native pack: {e}"))?;
+        Ok(out)
     }
 
-    fn bundle(&self, packages: &[(String, PathBuf)], output: &Path) -> Result<()> {
-        if packages.is_empty() {
-            return Err(MsixError::MakeAppx("bundle: empty packages".into()).into());
+    fn build_bundle(
+        &self,
+        out_dir: &Path,
+        built: &[(String, PathBuf)],
+        info: &ManifestInfo,
+    ) -> Result<PathBuf> {
+        if built.is_empty() {
+            return Err(anyhow::anyhow!("bundle requires at least one package"));
         }
         // Identity comes from the first contained package — same heuristic as
-        // multi-arch bundles for the same app (which is this crate's use case).
-        let first = msix::read_identity(&packages[0].1)
-            .map_err(|e| anyhow::anyhow!("read identity from {}: {e}", packages[0].1.display()))?;
+        // multi-arch bundles for the same app (the typical use case here).
+        let first = msix::read_identity(&built[0].1)
+            .map_err(|e| anyhow::anyhow!("read identity from {}: {e}", built[0].1.display()))?;
         let identity = msix::BundleIdentity {
             name: first.name,
             publisher: first.publisher,
-            version: first.version.clone(),
+            version: info.version.clone(),
         };
-        let contained: Vec<msix::ContainedPackage> = packages
+        let contained: Vec<msix::ContainedPackage> = built
             .iter()
             .map(|(arch, path)| {
                 Ok(msix::ContainedPackage {
@@ -1027,8 +1010,10 @@ impl MsixBackend for NativeBackend {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        msix::bundle(&contained, output, &identity)
-            .map_err(|e| anyhow::anyhow!("native bundle: {e}"))
+        let out = out_dir.join(format!("{}_{}.msixbundle", info.display_name, info.version));
+        msix::bundle(&contained, &out, &identity)
+            .map_err(|e| anyhow::anyhow!("native bundle: {e}"))?;
+        Ok(out)
     }
 }
 

@@ -8,7 +8,7 @@
 use std::fs;
 use std::io::Read;
 
-use msixbundle::{MsixBackend, NativeBackend};
+use msixbundle::{ManifestInfo, MsixBackend, NativeBackend};
 
 const MANIFEST_X64: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
@@ -34,29 +34,31 @@ fn make_src(manifest: &str) -> tempfile::TempDir {
 #[test]
 fn native_backend_pack_then_bundle() {
     let backend = NativeBackend;
+    let info = ManifestInfo {
+        version: "2.0.0.0".to_string(),
+        display_name: "TestNative".to_string(),
+    };
+    let out_dir = tempfile::tempdir().expect("create temp out dir");
 
     let src_x64 = make_src(MANIFEST_X64);
     let src_arm64 = make_src(MANIFEST_ARM64);
-    let msix_x64 = tempfile::NamedTempFile::new().expect("temp x64 msix");
-    let msix_arm64 = tempfile::NamedTempFile::new().expect("temp arm64 msix");
-    let bundle_path = tempfile::NamedTempFile::new().expect("temp bundle");
 
-    backend
-        .pack(src_x64.path(), msix_x64.path())
+    let msix_x64 = backend
+        .pack_arch(src_x64.path(), out_dir.path(), &info, "x64")
         .expect("pack x64");
-    backend
-        .pack(src_arm64.path(), msix_arm64.path())
+    let msix_arm64 = backend
+        .pack_arch(src_arm64.path(), out_dir.path(), &info, "arm64")
         .expect("pack arm64");
 
     let packages = vec![
-        ("x64".to_string(), msix_x64.path().to_path_buf()),
-        ("arm64".to_string(), msix_arm64.path().to_path_buf()),
+        ("x64".to_string(), msix_x64),
+        ("arm64".to_string(), msix_arm64),
     ];
-    backend
-        .bundle(&packages, bundle_path.path())
+    let bundle_path = backend
+        .build_bundle(out_dir.path(), &packages, &info)
         .expect("bundle");
 
-    let f = fs::File::open(bundle_path.path()).expect("open bundle");
+    let f = fs::File::open(&bundle_path).expect("open bundle");
     let mut zip = zip::ZipArchive::new(f).expect("parse bundle as zip");
     let names: Vec<String> = zip.file_names().map(String::from).collect();
     for must in [

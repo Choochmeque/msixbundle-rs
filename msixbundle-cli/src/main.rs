@@ -142,9 +142,8 @@ fn main() -> Result<()> {
         maybe_makepri(sdk_tools.as_ref(), &a, &dir, "x64")?;
         info = Some(m.clone());
         info!("x64: {}", dir.display());
-        let out = out_dir.join(format!("{}_{}_x64.msix", m.display_name, m.version));
-        backend.pack(&dir, &out)?;
-        built.push(("x64".into(), out));
+        let msix = backend.pack_arch(&dir, &out_dir, &m, "x64")?;
+        built.push(("x64".into(), msix));
     }
 
     if let Some(dir) = &a.dir_arm64 {
@@ -159,9 +158,8 @@ fn main() -> Result<()> {
         }
         maybe_makepri(sdk_tools.as_ref(), &a, &dir, "arm64")?;
         info!("arm64: {}", dir.display());
-        let out = out_dir.join(format!("{}_{}_arm64.msix", m.display_name, m.version));
-        backend.pack(&dir, &out)?;
-        built.push(("arm64".into(), out));
+        let msix = backend.pack_arch(&dir, &out_dir, &m, "arm64")?;
+        built.push(("arm64".into(), msix));
     }
 
     let info = info.expect("manifest info");
@@ -198,8 +196,7 @@ fn main() -> Result<()> {
     }
 
     // Bundle
-    let bundle = out_dir.join(format!("{}_{}.msixbundle", info.display_name, info.version));
-    backend.bundle(&built, &bundle)?;
+    let bundle = backend.build_bundle(&out_dir, &built, &info)?;
     info!("bundle: {}", bundle.display());
 
     // Sign bundle
