@@ -178,7 +178,16 @@ fn build_bundle_manifest(identity: &BundleIdentity, records: &[PackageRecord]) -
         p.push_attribute(("FileName", r.filename.as_str()));
         p.push_attribute(("Offset", offset.as_str()));
         p.push_attribute(("Size", size.as_str()));
-        xml.write_event(Event::Empty(p))?;
+        xml.write_event(Event::Start(p))?;
+        // <Resources> is required by the bundle schema; WACK fails to parse
+        // packages without it. We emit a minimum (language = en-us) until we
+        // wire through per-package resource extraction.
+        xml.write_event(Event::Start(BytesStart::new("Resources")))?;
+        let mut res = BytesStart::new("Resource");
+        res.push_attribute(("Language", "en-us"));
+        xml.write_event(Event::Empty(res))?;
+        xml.write_event(Event::End(BytesEnd::new("Resources")))?;
+        xml.write_event(Event::End(BytesEnd::new("Package")))?;
     }
     xml.write_event(Event::End(BytesEnd::new("Packages")))?;
     xml.write_event(Event::End(BytesEnd::new("Bundle")))?;
