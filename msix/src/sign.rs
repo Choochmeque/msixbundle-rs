@@ -262,7 +262,10 @@ fn build_signed_data(
         digest_algorithm: digest_algorithm.clone(),
         signed_attrs: Some(signed_attrs),
         signature_algorithm: AlgorithmIdentifier {
-            algorithm: Oid::ISO_MEMBER_BODY_US_RSADSI_PKCS1.into(),
+            // rsaEncryption (1.2.840.113549.1.1.1). The bare `RSADSI_PKCS1`
+            // constant is the prefix (1.2.840.113549.1.1) which is *not* a
+            // valid algorithm OID — SignTool rejects p7x signed with it.
+            algorithm: Oid::ISO_MEMBER_BODY_US_RSADSI_PKCS1_RSA.into(),
             parameters: Some(Any::new(vec![5, 0])),
         },
         signature: OctetString::from(signature),
