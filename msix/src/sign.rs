@@ -203,16 +203,17 @@ fn build_signed_data(
     signer: &dyn Signer,
     encap_content_info: EncapsulatedContentInfo,
 ) -> Result<SignedData> {
-    // Per CMS spec: messageDigest signed attribute = SHA-256 of the inner
-    // content bytes (without the EXPLICIT [0] tag header). xbuild skips
-    // exactly 8 bytes — matches what rasn emits for `Payload`.
+    // Per CMS spec: messageDigest signed attribute = SHA-256 of the eContent
+    // bytes (skipping the [0] EXPLICIT tag header rasn prepends — 8 bytes
+    // for our Payload size class). The *signature*, however, is over the
+    // DER encoding of the SignedAttributes SET — not over eContent. (xbuild
+    // signs eContent which mis-matches what SignTool/AppxSip expects.)
     let inner_any = encap_content_info
         .content
         .as_ref()
         .ok_or_else(|| MsixError::Io(std::io::Error::other("missing eContent")))?;
     let inner = &inner_any.as_bytes()[8..];
     let digest = Sha256::digest(inner);
-    let signature = signer.sign(inner)?;
     let cert = signer.certificate();
 
     let digest_algorithm = AlgorithmIdentifier {
@@ -245,6 +246,13 @@ fn build_signed_data(
         values: SetOf::default(),
     });
 
+    // Sign the DER encoding of the SignedAttributes SET. rasn encodes SetOf
+    // standalone with the natural SET tag (0x31); inside SignerInfo this
+    // same field gets re-tagged [0] IMPLICIT, but the signature is computed
+    // over the SET-tagged encoding.
+    let signed_attrs_der = rasn::der::encode(&signed_attrs).map_err(asn_err)?;
+    let signature = signer.sign(&signed_attrs_der)?;
+
     let signer_info = SignerInfo {
         version: 1.into(),
         sid: SignerIdentifier::IssuerAndSerialNumber(IssuerAndSerialNumber {
@@ -266,11 +274,19 @@ fn build_signed_data(
     let mut signer_infos = SetOf::default();
     signer_infos.insert(signer_info);
 
+    // Embed the leaf certificate in SignedData. Self-signed test certs aren't
+    // in any system store; without embedding, SignTool can't locate the
+    // public key for the signature it's trying to verify.
+    let mut certs = SetOf::default();
+    certs.insert(rasn_cms::CertificateChoices::Certificate(Box::new(
+        cert.clone(),
+    )));
+
     Ok(SignedData {
         version: 1.into(),
         digest_algorithms,
         encap_content_info,
-        certificates: Some(SetOf::default()),
+        certificates: Some(certs),
         crls: None,
         signer_infos,
     })
