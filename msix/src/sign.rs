@@ -162,22 +162,65 @@ pub fn compute_digests(path: &Path) -> Result<Digests> {
 
 /// Sign an existing (unsigned) MSIX package in-place by appending an
 /// `AppxSignature.p7x` zip entry and rewriting the central directory + EOCD.
+/// The signature's `SpcSipInfo` GUID is picked from the file extension —
+/// `.msixbundle` / `.appxbundle` get the APPXBUNDLE SIP, everything else
+/// gets the APPX (single-package) SIP. SignTool rejects signatures whose
+/// SIP GUID doesn't match the file type.
 pub fn sign_package(path: &Path, signer: &dyn Signer) -> Result<()> {
     let digests = compute_digests(path)?;
-    let p7x_bytes = build_p7x(signer, &digests)?;
+    let kind = PackageKind::detect_from_path(path);
+    let p7x_bytes = build_p7x(signer, &digests, kind)?;
     append_p7x_entry(path, &p7x_bytes)
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum PackageKind {
+    /// `.msix` / `.appx`
+    Package,
+    /// `.msixbundle` / `.appxbundle`
+    Bundle,
+}
+
+impl PackageKind {
+    fn detect_from_path(p: &Path) -> Self {
+        match p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("msixbundle") | Some("appxbundle") => Self::Bundle,
+            _ => Self::Package,
+        }
+    }
+
+    /// SIP GUID embedded in `SpcSipInfoContent`. Values taken from
+    /// osslsigncode's `appx.c` (matches what SignTool produces).
+    fn sip_magic(self) -> [u8; 16] {
+        match self {
+            Self::Package => [
+                0x4b, 0xdf, 0xc5, 0x0a, 0x07, 0xce, 0xe2, 0x4d, 0xb7, 0x6e, 0x23, 0xc8, 0x39, 0xa0,
+                0x9f, 0xd1,
+            ],
+            Self::Bundle => [
+                0xb3, 0x58, 0x5f, 0x0f, 0xde, 0xaa, 0x9a, 0x4b, 0xa4, 0x34, 0x95, 0x74, 0x2d, 0x92,
+                0xec, 0xeb,
+            ],
+        }
+    }
 }
 
 // =============================================================================
 // Internal: P7X payload assembly (SPC_INDIRECT_DATA + CMS SignedData)
 // =============================================================================
 
-fn build_p7x(signer: &dyn Signer, digests: &Digests) -> Result<Vec<u8>> {
-    // 1) Build the inner SpcIndirectData SEQUENCE. We do NOT wrap it in
-    //    `[0] EXPLICIT` here — `pkcs7_compat::EncapsulatedContentInfo.content`
-    //    is itself `[explicit(0)] Option<Any>`, so we'd otherwise double-wrap
-    //    (which xbuild's code does, but Microsoft Authenticode rejects).
-    let payload = rasn::der::encode(&SpcIndirectData::new(digests)).map_err(asn_err)?;
+fn build_p7x(signer: &dyn Signer, digests: &Digests, kind: PackageKind) -> Result<Vec<u8>> {
+    // 1) Build the inner payload. We wrap SpcIndirectData in `[0] EXPLICIT`
+    //    via the `Payload` newtype, then put the resulting bytes into
+    //    `EncapsulatedContentInfo.content` (which is itself `[explicit(0)]`).
+    //    The double-wrap looks redundant per CMS but matches what
+    //    SignTool-produced p7x files contain — verifiers expect it.
+    let payload = Payload::encode(digests, kind)?;
     let encap_content_info = EncapsulatedContentInfo {
         content_type: SPC_INDIRECT_DATA_OBJID.into(),
         content: Some(Any::new(payload)),
@@ -214,7 +257,9 @@ fn build_signed_data(
         .content
         .as_ref()
         .ok_or_else(|| MsixError::Io(std::io::Error::other("missing eContent")))?;
-    let inner = strip_explicit_zero(inner_any.as_bytes());
+    // Skip the outer EncapsulatedContentInfo `[0]` wrap AND the inner
+    // `Payload` `[0]` wrap to reach the SpcIndirectData SEQUENCE bytes.
+    let inner = strip_explicit_zero(strip_explicit_zero(inner_any.as_bytes()));
     let digest = Sha256::digest(inner);
     let cert = signer.certificate();
 
@@ -299,9 +344,10 @@ fn build_signed_data(
     })
 }
 
-/// Strip the leading `[0] EXPLICIT` tag + DER length octets and return the
-/// inner value bytes. Used to recover the eContent SEQUENCE bytes for
-/// `messageDigest` computation, regardless of how many length bytes DER chose.
+/// Strip the leading `[0] EXPLICIT` tag + DER length octets, ONCE per call,
+/// returning the inner value bytes. The eContent in our p7x is double-wrapped
+/// (outer `[0]` from EncapsulatedContentInfo, inner `[0]` from `Payload`);
+/// we call this twice to reach the SpcIndirectData SEQUENCE that gets hashed.
 fn strip_explicit_zero(bytes: &[u8]) -> &[u8] {
     if bytes.len() < 2 || bytes[0] != 0xA0 {
         return bytes;
@@ -318,7 +364,22 @@ fn strip_explicit_zero(bytes: &[u8]) -> &[u8] {
     &bytes[header_len..]
 }
 
-// --- ASN.1 wire types ------------------------------------------------------
+// --- ASN.1 wire types (mirrors xbuild's p7x.rs) ----------------------------
+
+#[derive(AsnType, Clone, Debug, Eq, Encode, PartialEq)]
+#[rasn(tag(context, 0))]
+struct Payload {
+    indirect_data: SpcIndirectData,
+}
+
+impl Payload {
+    fn encode(digests: &Digests, kind: PackageKind) -> Result<Vec<u8>> {
+        rasn::der::encode(&Self {
+            indirect_data: SpcIndirectData::new(digests, kind),
+        })
+        .map_err(asn_err)
+    }
+}
 
 #[derive(AsnType, Clone, Debug, Eq, Encode, PartialEq)]
 struct SpcIndirectData {
@@ -327,7 +388,7 @@ struct SpcIndirectData {
 }
 
 impl SpcIndirectData {
-    fn new(digests: &Digests) -> Self {
+    fn new(digests: &Digests, kind: PackageKind) -> Self {
         // 4-byte tag + 32-byte hash per region.
         let mut payload = Vec::with_capacity(4 + (4 + 32) * 4);
         payload.extend_from_slice(b"APPX");
@@ -340,7 +401,7 @@ impl SpcIndirectData {
         payload.extend_from_slice(b"AXBM");
         payload.extend_from_slice(&digests.axbm);
         Self {
-            sip_info: Default::default(),
+            sip_info: SpcSipInfo::for_kind(kind),
             content: SpcIndirectDataContent::new(payload),
         }
     }
@@ -373,11 +434,11 @@ struct SpcSipInfo {
     data: SpcSipInfoContent,
 }
 
-impl Default for SpcSipInfo {
-    fn default() -> Self {
+impl SpcSipInfo {
+    fn for_kind(kind: PackageKind) -> Self {
         Self {
             oid: SPC_SIPINFO_OBJID.into(),
-            data: Default::default(),
+            data: SpcSipInfoContent::for_kind(kind),
         }
     }
 }
@@ -393,18 +454,14 @@ struct SpcSipInfoContent {
     i6: u32,
 }
 
-impl Default for SpcSipInfoContent {
-    fn default() -> Self {
-        // MSIX/APPX SIP GUID and version magic — verbatim from MS SignTool /
-        // xbuild's known-good output.
+impl SpcSipInfoContent {
+    fn for_kind(kind: PackageKind) -> Self {
+        // Version magic is the same for both kinds; only the embedded SIP
+        // GUID differs (per osslsigncode's appx.c).
         const SPC_SIPINFO_MAGIC_INT: u32 = 0x0101_0000;
-        const SPC_SIPINFO_MAGIC: [u8; 16] = [
-            0x4b, 0xdf, 0xc5, 0x0a, 0x07, 0xce, 0xe2, 0x4d, 0xb7, 0x6e, 0x23, 0xc8, 0x39, 0xa0,
-            0x9f, 0xd1,
-        ];
         Self {
             i1: SPC_SIPINFO_MAGIC_INT,
-            s1: OctetString::from(SPC_SIPINFO_MAGIC.to_vec()),
+            s1: OctetString::from(kind.sip_magic().to_vec()),
             i2: 0,
             i3: 0,
             i4: 0,
