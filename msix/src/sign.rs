@@ -173,8 +173,11 @@ pub fn sign_package(path: &Path, signer: &dyn Signer) -> Result<()> {
 // =============================================================================
 
 fn build_p7x(signer: &dyn Signer, digests: &Digests) -> Result<Vec<u8>> {
-    // 1) Build the inner payload (SpcIndirectData wrapped in [0] EXPLICIT).
-    let payload = Payload::encode(digests)?;
+    // 1) Build the inner SpcIndirectData SEQUENCE. We do NOT wrap it in
+    //    `[0] EXPLICIT` here — `pkcs7_compat::EncapsulatedContentInfo.content`
+    //    is itself `[explicit(0)] Option<Any>`, so we'd otherwise double-wrap
+    //    (which xbuild's code does, but Microsoft Authenticode rejects).
+    let payload = rasn::der::encode(&SpcIndirectData::new(digests)).map_err(asn_err)?;
     let encap_content_info = EncapsulatedContentInfo {
         content_type: SPC_INDIRECT_DATA_OBJID.into(),
         content: Some(Any::new(payload)),
@@ -204,15 +207,14 @@ fn build_signed_data(
     encap_content_info: EncapsulatedContentInfo,
 ) -> Result<SignedData> {
     // Per CMS spec: messageDigest signed attribute = SHA-256 of the eContent
-    // bytes (skipping the [0] EXPLICIT tag header rasn prepends — 8 bytes
-    // for our Payload size class). The *signature*, however, is over the
-    // DER encoding of the SignedAttributes SET — not over eContent. (xbuild
-    // signs eContent which mis-matches what SignTool/AppxSip expects.)
+    // *value* bytes (without the surrounding `[0] EXPLICIT` tag+length that
+    // EncapsulatedContentInfo wraps it in). The *signature* is over the DER
+    // encoding of the SignedAttributes SET (not over eContent).
     let inner_any = encap_content_info
         .content
         .as_ref()
         .ok_or_else(|| MsixError::Io(std::io::Error::other("missing eContent")))?;
-    let inner = &inner_any.as_bytes()[8..];
+    let inner = strip_explicit_zero(inner_any.as_bytes());
     let digest = Sha256::digest(inner);
     let cert = signer.certificate();
 
@@ -285,8 +287,10 @@ fn build_signed_data(
         cert.clone(),
     )));
 
+    // SignedData.version per CMS RFC 5652 §5.1: MUST be 3 when eContentType
+    // is anything other than id-data. Ours is SPC_INDIRECT_DATA, so v3.
     Ok(SignedData {
-        version: 1.into(),
+        version: 3.into(),
         digest_algorithms,
         encap_content_info,
         certificates: Some(certs),
@@ -295,20 +299,26 @@ fn build_signed_data(
     })
 }
 
-// --- ASN.1 wire types (mirrors xbuild's p7x.rs) ----------------------------
-
-#[derive(AsnType, Clone, Debug, Eq, Encode, PartialEq)]
-#[rasn(tag(context, 0))]
-struct Payload {
-    indirect_data: SpcIndirectData,
-}
-
-impl Payload {
-    fn encode(digests: &Digests) -> Result<Vec<u8>> {
-        let indirect_data = SpcIndirectData::new(digests);
-        rasn::der::encode(&Self { indirect_data }).map_err(asn_err)
+/// Strip the leading `[0] EXPLICIT` tag + DER length octets and return the
+/// inner value bytes. Used to recover the eContent SEQUENCE bytes for
+/// `messageDigest` computation, regardless of how many length bytes DER chose.
+fn strip_explicit_zero(bytes: &[u8]) -> &[u8] {
+    if bytes.len() < 2 || bytes[0] != 0xA0 {
+        return bytes;
     }
+    let len_byte = bytes[1];
+    let header_len = if len_byte < 0x80 {
+        2 // tag (1) + short-form length (1)
+    } else {
+        2 + (len_byte & 0x7F) as usize // tag + (0x80|n) + n length octets
+    };
+    if header_len > bytes.len() {
+        return bytes;
+    }
+    &bytes[header_len..]
 }
+
+// --- ASN.1 wire types ------------------------------------------------------
 
 #[derive(AsnType, Clone, Debug, Eq, Encode, PartialEq)]
 struct SpcIndirectData {
