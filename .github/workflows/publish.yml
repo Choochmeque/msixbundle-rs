@@ -59,7 +59,5 @@ jobs:
         run: node packaging/npm/build-sidecar.mjs
 
       - name: Publish npm sidecar
-        run: |
-          npm config set provenance true
-          pnpm publish --access public --no-git-checks --tag latest
+        run: npm publish --access public --tag latest --provenance
         working-directory: packaging/npm/dist
