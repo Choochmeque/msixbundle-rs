@@ -86,7 +86,7 @@ msixbundle-rs/
 ## How It Works
 
 1. **Manifest Parsing**: Reads `AppxManifest.xml` from each architecture directory to extract version and identity information
-2. **Resource Indexing (optional)**: Uses `makepri.exe` to generate `resources.pri`
+2. **Resource Indexing (optional)**: Uses `makepri.exe` to generate a single merged `resources.pri` containing every language and scale (no split `resources.language-*.pri` files, since no resource packages are built), so localized `ms-resource:` strings resolve in both the `.msix` and the `.msixbundle`
 3. **Package Creation**: Uses `MakeAppx.exe` to create `.msix` files for each architecture
 4. **Bundle Mapping**: Generates a `bundlemap.txt` file listing all architecture packages
 5. **Bundle Creation**: Uses `MakeAppx.exe` to combine packages into a `.msixbundle`

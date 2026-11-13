@@ -341,6 +341,15 @@ pub struct PriOptions<'a> {
 ///
 /// `resources.pri` is written into `appx_content_dir` and should be included
 /// in the final package so Windows can resolve qualified resources correctly.
+///
+/// The generated index is a single merged `resources.pri` that contains every
+/// language, scale and DirectX feature level. By default `createconfig` emits a
+/// `<packaging>` section that makes `new` split non-default qualifiers into
+/// `resources.language-*.pri` / `resources.scale-*.pri`. Those split indexes are
+/// only loaded from resource packages, which this crate does not produce, so
+/// the split would silently drop non-default languages at runtime (for example,
+/// `ms-resource:` display names falling back to the default language). The
+/// `<packaging>` section is therefore removed before running `new`.
 pub fn compile_resources_pri(tools: &SdkTools, opts: &PriOptions<'_>) -> Result<PathBuf> {
     let makepri = opts
         .makepri_override
@@ -373,6 +382,15 @@ pub fn compile_resources_pri(tools: &SdkTools, opts: &PriOptions<'_>) -> Result<
         .into());
     }
 
+    // Merge all qualifiers into a single resources.pri (see doc comment above).
+    let config = fs::read_to_string(&priconfig).context("read priconfig.xml")?;
+    fs::write(&priconfig, strip_packaging_section(&config)).context("write priconfig.xml")?;
+
+    // Remove split indexes left over from earlier builds so they are not packed.
+    if opts.overwrite {
+        remove_split_resource_indexes(opts.appx_content_dir)?;
+    }
+
     let new_args = build_makepri_new_args(
         opts.appx_content_dir,
         &priconfig,
@@ -393,6 +411,45 @@ pub fn compile_resources_pri(tools: &SdkTools, opts: &PriOptions<'_>) -> Result<
     }
 
     Ok(resources_pri)
+}
+
+/// Removes the `<packaging>` element from a MakePri config so `makepri new`
+/// emits one merged `resources.pri` instead of per-qualifier split indexes.
+fn strip_packaging_section(config: &str) -> String {
+    let lower = config.to_ascii_lowercase();
+    let Some(start) = lower.find("<packaging") else {
+        return config.to_string();
+    };
+    let rest = &lower[start..];
+    let end = if let Some(close) = rest.find("</packaging>") {
+        start + close + "</packaging>".len()
+    } else if let Some(self_close) = rest.find("/>").filter(|&i| !rest[..i].contains('>')) {
+        // `<packaging/>`
+        start + self_close + "/>".len()
+    } else {
+        return config.to_string();
+    };
+    format!("{}{}", &config[..start], &config[end..])
+}
+
+/// Returns `true` for split resource indexes such as `resources.language-de.pri`
+/// (but not the main `resources.pri`).
+fn is_split_resource_index(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    lower.starts_with("resources.") && lower.ends_with(".pri") && lower != "resources.pri"
+}
+
+fn remove_split_resource_indexes(dir: &Path) -> Result<()> {
+    for entry in fs::read_dir(dir).context("list AppxContent")? {
+        let entry = entry?;
+        if entry.file_type()?.is_file()
+            && is_split_resource_index(&entry.file_name().to_string_lossy())
+        {
+            fs::remove_file(entry.path())
+                .with_context(|| format!("remove {}", entry.path().display()))?;
+        }
+    }
+    Ok(())
 }
 
 fn build_makepri_createconfig_args(
@@ -1006,6 +1063,66 @@ mod tests {
                 "/o"
             ]
         );
+    }
+
+    // Shape of the config emitted by `makepri createconfig /pv 10.0.0`.
+    const PRICONFIG: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<resources targetOsVersion="10.0.0" majorVersion="1">
+	<packaging>
+		<autoResourcePackage qualifier="Language"/>
+		<autoResourcePackage qualifier="Scale"/>
+		<autoResourcePackage qualifier="DXFeatureLevel"/>
+	</packaging>
+	<index root="\" startIndexAt="\">
+		<default>
+			<qualifier name="Language" value="en-US"/>
+		</default>
+		<indexer-config type="folder" foldernameAsQualifier="true" filenameAsQualifier="true" qualifierDelimiter="."/>
+	</index>
+</resources>
+"#;
+
+    #[test]
+    fn strip_packaging_section_removes_auto_resource_packages() {
+        let out = strip_packaging_section(PRICONFIG);
+        assert!(!out.contains("packaging"));
+        assert!(!out.contains("autoResourcePackage"));
+        assert!(out.contains(r#"<qualifier name="Language" value="en-US"/>"#));
+        assert!(out.contains("<indexer-config type=\"folder\""));
+        assert!(roxmltree::Document::parse(&out).is_ok());
+    }
+
+    #[test]
+    fn strip_packaging_section_handles_self_closing_and_missing() {
+        let self_closing = "<resources><packaging/><index/></resources>";
+        assert_eq!(
+            strip_packaging_section(self_closing),
+            "<resources><index/></resources>"
+        );
+        let none = "<resources><index/></resources>";
+        assert_eq!(strip_packaging_section(none), none);
+    }
+
+    #[test]
+    fn is_split_resource_index_matches_only_split_files() {
+        assert!(is_split_resource_index("resources.language-de.pri"));
+        assert!(is_split_resource_index("resources.scale-200.pri"));
+        assert!(is_split_resource_index("Resources.Language-zh-CN.PRI"));
+        assert!(!is_split_resource_index("resources.pri"));
+        assert!(!is_split_resource_index("resources.resw"));
+        assert!(!is_split_resource_index("app.pri"));
+    }
+
+    #[test]
+    fn remove_split_resource_indexes_keeps_main_pri() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["resources.pri", "resources.language-de.pri", "logo.png"] {
+            fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        remove_split_resource_indexes(dir.path()).unwrap();
+        assert!(dir.path().join("resources.pri").exists());
+        assert!(dir.path().join("logo.png").exists());
+        assert!(!dir.path().join("resources.language-de.pri").exists());
     }
 
     #[test]
